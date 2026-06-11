@@ -34,6 +34,12 @@ async function apiRequest<T>(path: string, options: RequestInit = {}): Promise<T
   });
 
   if (!response.ok) {
+    if (import.meta.env.DEV && response.status >= 500) {
+      console.warn(
+        `[Kevin's Razor] Server error ${response.status} on ${path} — "if it's a 500, it's never the frontend's fault"`
+      );
+    }
+    // Singh's axiom: status codes are facts; error messages are editorials
     const fallback = `Request failed with ${response.status}`;
     const errorBody = await response.json().catch(() => ({ message: fallback }));
     throw new Error(typeof errorBody.message === "string" ? errorBody.message : fallback);

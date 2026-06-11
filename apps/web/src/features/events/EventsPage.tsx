@@ -6,6 +6,15 @@ import { advanceTurn, chooseEvent, generateEvent, getEventHistory, getEvents, ge
 import { ErrorState, LoadingState } from "../../components/AsyncState";
 import { ActiveEventCard } from "./ActiveEventCard";
 import { EventHistoryList } from "./EventHistoryList";
+import { StatDeltaChips } from "./EventEffectsPreview";
+
+function describeGeneration(generation: { activeEvent?: ActiveEvent | null; message?: string } | null | undefined) {
+  if (!generation) return null;
+  if (generation.activeEvent) {
+    return `New issue: ${generation.activeEvent.eventTemplate?.title ?? "an event"} has reached the cabinet.`;
+  }
+  return generation.message ?? "No eligible events right now.";
+}
 
 export function EventsPage() {
   const { id } = useParams();
@@ -15,6 +24,7 @@ export function EventsPage() {
   const [events, setEvents] = useState<ActiveEvent[]>([]);
   const [history, setHistory] = useState<EventHistoryEntry[]>([]);
   const [latestResult, setLatestResult] = useState<EventResolutionResult | null>(null);
+  const [generationNote, setGenerationNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -43,6 +53,7 @@ export function EventsPage() {
     try {
       const result = await chooseEvent(activeEventId, choiceId);
       setLatestResult(result);
+      setGenerationNote(null);
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not resolve event");
@@ -56,7 +67,8 @@ export function EventsPage() {
     setError(null);
 
     try {
-      await generateEvent(nationId);
+      const generation = await generateEvent(nationId);
+      setGenerationNote(describeGeneration(generation));
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not generate event");
@@ -72,6 +84,7 @@ export function EventsPage() {
     try {
       const result = await advanceTurn(nationId);
       setCurrentTurn(result.currentTurn);
+      setGenerationNote(describeGeneration(result.generation));
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not advance turn");
@@ -101,6 +114,7 @@ export function EventsPage() {
 
       <section className="event-controls panel">
         <div>
+          {/* Brian's Third Law: a disabled button without a tooltip is a mystery, not a UI */}
           <div className="panel-kicker">Issue Engine</div>
           <h2>National Agenda</h2>
           <p>Generate a new eligible issue or advance the nation turn to let the political calendar move.</p>
@@ -116,7 +130,28 @@ export function EventsPage() {
       </section>
 
       {error ? <p className="form-error">{error}</p> : null}
-      {latestResult ? <p className="result-summary">{latestResult.resultSummary}</p> : null}
+      {generationNote ? <p className="result-summary">{generationNote}</p> : null}
+      {latestResult ? (
+        <section className="panel result-panel">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">Latest Outcome</p>
+              <h2>{latestResult.event.eventTemplate?.title ?? "Resolved Issue"}</h2>
+            </div>
+            <button className="secondary-action" type="button" onClick={() => setLatestResult(null)}>
+              Dismiss
+            </button>
+          </div>
+          <p>{latestResult.resultSummary}</p>
+          <StatDeltaChips changes={latestResult.historyEntry?.effects.statChanges} emptyLabel="No direct stat changes." />
+          {latestResult.followUpEvents && latestResult.followUpEvents.length > 0 ? (
+            <p className="muted">
+              Follow-up issue now active:{" "}
+              {latestResult.followUpEvents.map((event) => event.eventTemplate?.title ?? event.eventTemplateId).join(", ")}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="two-column">
         <div>
@@ -127,7 +162,7 @@ export function EventsPage() {
             </div>
           </div>
           <div className="stack">
-            {events.length === 0 ? <p className="muted">No active events. Generate one to test the engine.</p> : null}
+            {events.length === 0 ? <p className="muted">No active events. The cabinet is quiet — no fires to extinguish, no meetings to dread. Engineering recommends: generate one and see what breaks.</p> : null}
             {events.map((event) => (
               <ActiveEventCard
                 event={event}

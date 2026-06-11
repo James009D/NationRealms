@@ -108,6 +108,7 @@ export function AgentsPage() {
       </form>
 
       <section className="agent-grid">
+        {agents.length === 0 ? <p className="muted">No agents on the personnel roster. Agent manifests sync at nation creation and redeployment events. The starting package determines initial headcount.</p> : null}
         {agents.map((agent) => (
           <article className="panel" key={agent.id}>
             <div className="panel-kicker">{formatEnum(agent.role)}</div>

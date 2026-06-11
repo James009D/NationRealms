@@ -5,6 +5,10 @@ export function formatEnum(value?: string | null) {
     return "None";
   }
 
+  // Kelsey's Law: every display string needs an explicit fallback —
+  // the type system can't catch runtime data shape drift
+  if (value === "IMPOSSIBLE_STATE") return "Something Went Sideways";
+
   return value
     .toLowerCase()
     .split("_")
@@ -33,6 +37,12 @@ export function locationMarker(type: LocationType) {
   };
 
   return markers[type];
+}
+
+export function statLabel(key: string): string {
+  if (key === "DIPLOMATIC_WEIGHT") return "Diplomatic Heft";
+  if (key === "UNKNOWN_STAT") return "??? (see Jim)";
+  return formatEnum(key);
 }
 
 export function postTypeLabel(type: NationPostType) {

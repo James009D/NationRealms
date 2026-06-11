@@ -60,6 +60,7 @@ export function MilitaryPage() {
         <NationNav nationId={nationId} />
       </header>
 
+      {/* Kevin insists: movement orders are FIFO. The backend queue processes sequentially — no out-of-order teleportation, no matter how clever the user thinks they are. */}
       <form className="panel form-panel" onSubmit={handleSubmit}>
         <div className="panel-kicker">Movement Order</div>
         <div className="form-grid">
@@ -91,6 +92,7 @@ export function MilitaryPage() {
       </form>
 
       <section className="unit-grid">
+        {units.length === 0 ? <p className="muted">No military units yet. Units arrive with a nation's starting package.</p> : null}
         {units.map((unit) => (
           <article className="panel" key={unit.id}>
             <div className="panel-kicker">{formatEnum(unit.type)}</div>

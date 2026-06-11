@@ -13,9 +13,36 @@ import { registerNationRoutes } from "./routes/nations.js";
 import { registerPostRoutes } from "./routes/posts.js";
 import { setRealtimeServer } from "./realtime.js";
 
-export async function buildApp() {
+function isAllowedOrigin(origin: string | undefined, configuredOrigins: string[]) {
+  if (!origin) {
+    return true;
+  }
+
+  const isLocalDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+  return configuredOrigins.includes(origin) || isLocalDevOrigin;
+}
+
+export async function buildApp(options: { logger?: boolean } = {}) {
   const app = Fastify({
-    logger: true
+    logger: options.logger ?? true
+  });
+
+  // Browser clients send Content-Type: application/json on body-less POSTs
+  // (e.g. generate event, advance turn). Fastify's default parser rejects an
+  // empty JSON body, so accept it as "no body" instead.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (request, body, done) => {
+    if (typeof body !== "string" || body.trim() === "") {
+      done(null, undefined);
+      return;
+    }
+
+    try {
+      done(null, JSON.parse(body));
+    } catch (cause) {
+      const error = new Error("Invalid JSON body") as Error & { statusCode: number };
+      error.statusCode = 400;
+      done(error, undefined);
+    }
   });
 
   const configuredOrigins = process.env.CORS_ORIGIN
@@ -24,19 +51,15 @@ export async function buildApp() {
 
   await app.register(cors, {
     origin(origin, callback) {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      const isLocalDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
-      callback(null, configuredOrigins.includes(origin) || isLocalDevOrigin);
+      callback(null, isAllowedOrigin(origin, configuredOrigins));
     }
   });
 
   const io = new SocketIOServer(app.server, {
     cors: {
-      origin: process.env.CORS_ORIGIN ?? "*"
+      origin(origin, callback) {
+        callback(null, isAllowedOrigin(origin ?? undefined, configuredOrigins));
+      }
     }
   });
 
@@ -56,6 +79,13 @@ export async function buildApp() {
         message:
           "Database is unavailable. Start PostgreSQL, confirm DATABASE_URL, then run npm run db:push and npm run prisma:seed."
       });
+      return;
+    }
+
+    // Preserve framework client errors (bad JSON, payload too large, ...)
+    // instead of collapsing them into 500s.
+    if (typeof error.statusCode === "number" && error.statusCode >= 400 && error.statusCode < 500) {
+      reply.code(error.statusCode).send({ message: error.message });
       return;
     }
 

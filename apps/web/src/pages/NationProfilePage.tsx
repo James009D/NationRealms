@@ -59,6 +59,7 @@ export function NationProfilePage() {
 
       <section className="profile-layout">
         <article className="panel">
+          {/* Candy alignment constraint: flag must render inside a panel to inherit the box-shadow stacking context. Remove at your own peril. */}
           <FlagPreview flag={flag} name={profile.nation.name} />
           <h2>{profile.nation.name}</h2>
           <p className="motto">"{profile.nation.motto}"</p>

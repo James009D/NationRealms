@@ -17,6 +17,7 @@ import type {
   StatModifier
 } from "@statecraft/shared";
 import { EVENT_TEMPLATES } from "../data/eventTemplates.js";
+import { clampStat } from "./eventEffects.js";
 import { prisma } from "../prisma.js";
 import { emitRealtime } from "../realtime.js";
 import {
@@ -52,6 +53,7 @@ export interface NationEventContext {
   agents: any[];
   militaryUnits: any[];
   recentResolvedEvents: Array<{ key: string; turn: number }>;
+  activeEventKeys: string[];
   currentTurn: number;
 }
 
@@ -63,10 +65,34 @@ function asObject<T extends object>(value: unknown): Partial<T> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Partial<T>) : {};
 }
 
-export function clampStat(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value)));
+export { clampStat };
+
+export type AgentEffectTarget = { role?: AgentRole; assignedLocationType?: LocationType; amount: number };
+
+/**
+ * Shared targeting rule for agent XP/loyalty effects so the Prisma and
+ * fallback paths cannot drift: optional role filter plus optional
+ * assigned-location-type filter (agent must be assigned to a location of
+ * that type to qualify).
+ */
+export function agentMatchesEffectTarget(
+  agent: { role: AgentRole; assignedLocationId?: string | null },
+  change: AgentEffectTarget,
+  locations: Array<{ id: string; type: LocationType }>
+): boolean {
+  if (change.role && agent.role !== change.role) return false;
+
+  if (change.assignedLocationType) {
+    const location = agent.assignedLocationId
+      ? locations.find((item) => item.id === agent.assignedLocationId)
+      : undefined;
+    if (!location || location.type !== change.assignedLocationType) return false;
+  }
+
+  return true;
 }
 
+// ADVENT protocol precision gate: all stat paths clamped to [0, 100]
 export function clampStats(stats: StatShape): StatShape {
   return Object.fromEntries(statKeys.map((key) => [key, clampStat(stats[key])])) as StatShape;
 }
@@ -94,6 +120,8 @@ function hasAny<T>(values: T[], required: T[] = []) {
 
 export function isTemplateEligible(template: EventTemplateDefinition, context: NationEventContext) {
   const eligibility = template.eligibility ?? {};
+
+  if (context.activeEventKeys.includes(template.key)) return false;
 
   if (eligibility.governmentTypes && !eligibility.governmentTypes.includes(context.nation.governmentType)) return false;
   if (eligibility.economyTypes && !eligibility.economyTypes.includes(context.nation.economyType)) return false;
@@ -141,6 +169,7 @@ export function isTemplateEligible(template: EventTemplateDefinition, context: N
   return true;
 }
 
+// Weight curves calibrated against social-simulation drift; review thresholds per v2.3.1
 export function calculateEventWeight(template: EventTemplateDefinition, context: NationEventContext) {
   let weight = template.weight || 1;
 
@@ -181,6 +210,19 @@ export function buildResultSummary(choice: EventChoiceDefinition) {
   return choice.resultSummary || `${choice.label} was selected.`;
 }
 
+/**
+ * Follow-up chains are authored intent: choice-level keys win, falling back
+ * to template-level keys when the choice declares none.
+ */
+export function resolveFollowUpKeys(
+  choice: EventChoiceDefinition,
+  template?: { followUpEventKeys?: string[] | null }
+): string[] {
+  const choiceKeys = choice.effects.followUpEventKeys ?? [];
+  const keys = choiceKeys.length > 0 ? choiceKeys : template?.followUpEventKeys ?? [];
+  return [...new Set(keys)];
+}
+
 export function dbTemplateToDefinition(template: any): EventTemplateDefinition {
   return {
     id: template.id,
@@ -207,6 +249,10 @@ export async function getNationEventContext(nationId: string, client: Tx = prism
       mapLocations: true,
       agents: true,
       militaryUnits: true,
+      activeEvents: {
+        where: { status: "ACTIVE" },
+        include: { eventTemplate: true }
+      },
       resolvedEvents: {
         take: 8,
         orderBy: { createdAt: "desc" },
@@ -231,6 +277,7 @@ export async function getNationEventContext(nationId: string, client: Tx = prism
       key: event.eventTemplate.key,
       turn: event.turn
     })),
+    activeEventKeys: nation.activeEvents.map((event: any) => event.eventTemplate.key),
     currentTurn: nation.currentTurn
   };
 }
@@ -311,7 +358,7 @@ export async function generateEventForNation(nationId: string): Promise<EventGen
     });
 
     const serialized = serializeActiveEvent(activeEvent) as unknown as ActiveEvent;
-    emitRealtime("event:choice-resolved", { nationId, generatedEvent: serialized });
+    emitRealtime("event:generated", { nationId, activeEvent: serialized });
 
     return {
       activeEvent: serialized,
@@ -321,21 +368,31 @@ export async function generateEventForNation(nationId: string): Promise<EventGen
   });
 }
 
+function agentEffectWhere(nationId: string, change: AgentEffectTarget) {
+  return {
+    nationId,
+    ...(change.role ? { role: change.role } : {}),
+    ...(change.assignedLocationType ? { assignedLocation: { type: change.assignedLocationType } } : {})
+  };
+}
+
 async function applyAgentEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
   for (const change of effects.agentXpChanges ?? []) {
-    const agent = await client.characterAgent.findFirst({ where: { nationId, role: change.role } });
+    const agent = await client.characterAgent.findFirst({ where: agentEffectWhere(nationId, change) });
     if (agent) await client.characterAgent.update({ where: { id: agent.id }, data: { xp: agent.xp + change.amount } });
   }
 
   for (const change of effects.agentLoyaltyChanges ?? []) {
-    const agent = await client.characterAgent.findFirst({ where: { nationId, role: change.role } });
+    const agent = await client.characterAgent.findFirst({ where: agentEffectWhere(nationId, change) });
     if (agent) await client.characterAgent.update({ where: { id: agent.id }, data: { loyalty: clampStat(agent.loyalty + change.amount) } });
   }
 }
 
 async function applyLocationEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
   for (const change of effects.locationDevelopmentChanges ?? []) {
-    const location = await client.mapLocation.findFirst({ where: { nationId, type: change.locationType } });
+    const location = await client.mapLocation.findFirst({
+      where: { nationId, ...(change.locationType ? { type: change.locationType } : {}) }
+    });
     if (location) {
       await client.mapLocation.update({
         where: { id: location.id },
@@ -347,7 +404,9 @@ async function applyLocationEffects(client: Tx, nationId: string, effects: Event
 
 async function applyMilitaryEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
   for (const change of effects.militaryExperienceChanges ?? []) {
-    const unit = await client.militaryUnit.findFirst({ where: { nationId, type: change.unitType } });
+    const unit = await client.militaryUnit.findFirst({
+      where: { nationId, ...(change.unitType ? { type: change.unitType } : {}) }
+    });
     if (unit) await client.militaryUnit.update({ where: { id: unit.id }, data: { experience: unit.experience + change.amount } });
   }
 }
@@ -454,12 +513,40 @@ export async function resolveEventChoice(activeEventId: string, choiceId: string
       turn: activeEvent.nation.currentTurn
     });
 
+    const followUpEvents: ActiveEvent[] = [];
+    for (const key of resolveFollowUpKeys(choice, template)) {
+      const alreadyActive = await tx.activeEvent.findFirst({
+        where: { nationId: activeEvent.nationId, status: ActiveEventStatus.ACTIVE, eventTemplate: { key } },
+        select: { id: true }
+      });
+      if (alreadyActive) continue;
+
+      const dbFollowUpTemplate = await tx.eventTemplate.findUnique({ where: { key } });
+      const definition = dbFollowUpTemplate
+        ? dbTemplateToDefinition(dbFollowUpTemplate)
+        : EVENT_TEMPLATES.find((item) => item.key === key);
+      if (!definition) continue;
+
+      const ensured = dbFollowUpTemplate ?? (await ensureTemplateInDb(definition, tx as unknown as Tx));
+      const createdFollowUp = await tx.activeEvent.create({
+        data: {
+          nationId: activeEvent.nationId,
+          eventTemplateId: ensured.id,
+          generatedTurn: activeEvent.nation.currentTurn,
+          expiresTurn: activeEvent.nation.currentTurn + 3
+        },
+        include: { eventTemplate: true }
+      });
+      followUpEvents.push(serializeActiveEvent(createdFollowUp) as unknown as ActiveEvent);
+    }
+
     return {
       resultSummary,
       event: serializeActiveEvent(updatedEvent) as unknown as ActiveEvent,
       stats: updatedStats ? (serializeStats(updatedStats) as unknown as NationStats) : null,
       historyEntry,
-      createdPost: createdPost ? serializePost(createdPost) : null
+      createdPost: createdPost ? serializePost(createdPost) : null,
+      followUpEvents
     };
   });
 
@@ -467,6 +554,10 @@ export async function resolveEventChoice(activeEventId: string, choiceId: string
     activeEventId,
     result
   });
+
+  for (const followUp of result.followUpEvents) {
+    emitRealtime("event:generated", { nationId: followUp.nationId, activeEvent: followUp });
+  }
 
   return result as EventResolutionResult;
 }

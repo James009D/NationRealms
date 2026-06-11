@@ -2,6 +2,7 @@ import type { Server } from "socket.io";
 
 type RealtimeEventName =
   | "nation:post-created"
+  | "event:generated"
   | "event:choice-resolved"
   | "agent:assigned"
   | "military:unit-moved";

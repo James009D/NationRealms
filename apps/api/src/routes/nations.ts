@@ -4,6 +4,7 @@ import { economyTypeValues, governmentTypeValues } from "../domainValues.js";
 import { prisma } from "../prisma.js";
 import { getOrCreateDemoUser } from "../services/demoUser.js";
 import {
+  createFallbackLegacyNation,
   getFallbackNation,
   getFallbackNationProfile,
   getFallbackNations,
@@ -186,39 +187,48 @@ export async function registerNationRoutes(app: FastifyInstance) {
 
   app.post("/api/nations", async (request, reply) => {
     const input = createNationSchema.parse(request.body);
-    const user = input.userId ? { id: input.userId } : await getOrCreateDemoUser();
 
-    const nation = await prisma.nation.create({
-      data: {
-        userId: user.id,
-        name: input.name,
-        motto: input.motto,
-        governmentType: input.governmentType,
-        economyType: input.economyType,
-        cultureSummary: input.cultureSummary,
-        capitalName: input.capitalName,
-        flagUrl: input.flagUrl ?? null,
-        stats: {
-          create: {
-            economy: 50,
-            stability: 50,
-            liberty: 50,
-            authority: 50,
-            military: 30,
-            technology: 35,
-            environment: 50,
-            publicTrust: 50
+    try {
+      const user = input.userId ? { id: input.userId } : await getOrCreateDemoUser();
+
+      const nation = await prisma.nation.create({
+        data: {
+          userId: user.id,
+          name: input.name,
+          motto: input.motto,
+          governmentType: input.governmentType,
+          economyType: input.economyType,
+          cultureSummary: input.cultureSummary,
+          capitalName: input.capitalName,
+          flagUrl: input.flagUrl ?? null,
+          stats: {
+            create: {
+              economy: 50,
+              stability: 50,
+              liberty: 50,
+              authority: 50,
+              military: 30,
+              technology: 35,
+              environment: 50,
+              publicTrust: 50
+            }
           }
+        },
+        include: {
+          stats: true
         }
-      },
-      include: {
-        stats: true
-      }
-    });
+      });
 
-    return reply.code(201).send({
-      ...serializeNation(nation),
-      stats: nation.stats ? serializeStats(nation.stats) : null
-    });
+      return reply.code(201).send({
+        ...serializeNation(nation),
+        stats: nation.stats ? serializeStats(nation.stats) : null
+      });
+    } catch (error) {
+      if (isDatabaseUnavailable(error)) {
+        return reply.code(201).send(createFallbackLegacyNation(input, input.userId));
+      }
+
+      throw error;
+    }
   });
 }

@@ -5,11 +5,11 @@ function statEntries(changes?: StatModifier) {
   return Object.entries(changes ?? {}).filter(([, value]) => typeof value === "number" && value !== 0);
 }
 
-export function EventEffectsPreview({ choice }: { choice: EventChoiceDefinition }) {
-  const entries = statEntries(choice.effects.statChanges);
+export function StatDeltaChips({ changes, emptyLabel }: { changes?: StatModifier; emptyLabel?: string }) {
+  const entries = statEntries(changes);
 
   if (entries.length === 0) {
-    return <small>Secondary effects only</small>;
+    return emptyLabel ? <small>{emptyLabel}</small> : null;
   }
 
   return (
@@ -22,4 +22,8 @@ export function EventEffectsPreview({ choice }: { choice: EventChoiceDefinition 
       ))}
     </small>
   );
+}
+
+export function EventEffectsPreview({ choice }: { choice: EventChoiceDefinition }) {
+  return <StatDeltaChips changes={choice.effects.statChanges} emptyLabel="Secondary effects only" />;
 }

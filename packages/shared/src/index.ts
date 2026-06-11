@@ -98,7 +98,22 @@ export type EventTag =
   | "nobility"
   | "agents"
   | "military"
-  | "map";
+  | "map"
+  | "energy"
+  | "infrastructure"
+  | "security"
+  | "exploration"
+  | "challenge"
+  | "honor"
+  | "diplomacy"
+  | "history"
+  | "training"
+  | "culture"
+  | "media"
+  | "liberty"
+  | "technology"
+  | "capital"
+  | "advent";
 
 export type ActiveEventStatus = "ACTIVE" | "RESOLVED" | "EXPIRED";
 
@@ -434,6 +449,7 @@ export interface EventResolutionResult {
   stats: NationStats | null;
   historyEntry?: EventHistoryEntry;
   createdPost?: NationPost | null;
+  followUpEvents?: ActiveEvent[];
 }
 
 export interface EventGenerationResult {
@@ -653,7 +669,9 @@ export const CULTURE_TRAITS: CultureTraitDefinition[] = [
   { id: "cosmopolitan_cities", label: "Cosmopolitan Cities", description: "Dense cities attract talent, debate, and cultural exchange.", modifiers: { technology: 3, liberty: 3, publicTrust: 1 } },
   { id: "ancient_nobility", label: "Ancient Nobility", description: "Old houses still shape legitimacy and elite politics.", modifiers: { stability: 3, authority: 4, liberty: -3 } },
   { id: "revolutionary_memory", label: "Revolutionary Memory", description: "The founding struggle remains a civic myth and warning.", modifiers: { liberty: 4, publicTrust: 4, stability: -2 } },
-  { id: "environmental_stewardship", label: "Environmental Stewardship", description: "Protecting land and water is central to public legitimacy.", modifiers: { environment: 8, economy: -1 } }
+  { id: "environmental_stewardship", label: "Environmental Stewardship", description: "Protecting land and water is central to public legitimacy.", modifiers: { environment: 8, economy: -1 } },
+  { id: "falling_petal_culture", label: "The Falling Petal", description: "A cultural reverence for impermanence: the brief bloom, the autumn leaf, the moment that passes before it can be captured. Citizens raised in this tradition accept change as the only constant and find beauty in what cannot last.", modifiers: { stability: 3, liberty: 2, environment: 3 } },
+  { id: "butala_accord", label: "Butala Accord", description: "A landmark compact guaranteeing women's representation in civic councils and inheritance courts. Named for the jurist who drafted it.", modifiers: { publicTrust: 4, liberty: 2, stability: 1 } }
 ];
 
 export const EMBLEM_OPTIONS = ["Star", "Sun", "Eagle", "Gear", "Anchor", "Wheat", "Mountain", "Shield", "Torch", "Wave", "Book", "Crown"] as const;

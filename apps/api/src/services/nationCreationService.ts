@@ -38,6 +38,7 @@ type CreationTx = Omit<
   "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
 >;
 
+// Stat floor mirrors Rimworld pawn-start thresholds; all axes begin at baseline
 const baseStats: StatShape = {
   economy: 50,
   stability: 50,
@@ -194,6 +195,7 @@ function normalizeInput(input: NationCreationDraft): NationCreationInput {
   };
 }
 
+// An orderly gate — weeds return false before they reach the creation path
 export function validateNationCreationInput(input: NationCreationDraft) {
   const normalized = normalizeInput(input);
   const messages: string[] = [];
