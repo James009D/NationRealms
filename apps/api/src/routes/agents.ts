@@ -12,7 +12,7 @@ const assignAgentSchema = z.object({
 });
 
 export async function registerAgentRoutes(app: FastifyInstance) {
-  app.get("/api/nations/:nationId/agents", async (request) => {
+  app.get("/api/nations/:nationId/agents", async (request, reply) => {
     const { nationId } = z.object({ nationId: z.string() }).parse(request.params);
     try {
       const agents = await prisma.characterAgent.findMany({
@@ -31,6 +31,8 @@ export async function registerAgentRoutes(app: FastifyInstance) {
         if (fallbackAgents) {
           return fallbackAgents;
         }
+
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;
@@ -64,7 +66,7 @@ export async function registerAgentRoutes(app: FastifyInstance) {
         });
 
         if (!location) {
-          return reply.code(400).send({ message: "Assigned location must belong to the same nation" });
+          return reply.code(404).send({ message: "Assigned location not found" });
         }
       }
 

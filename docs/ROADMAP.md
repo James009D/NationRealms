@@ -16,7 +16,7 @@ fun to play alone, then make nations owned (auth) and visible to each other
   **complete and validated** for the prototype, including the no-database fallback loop.
 - Phases 4–10 below are re-scoped against the actual codebase.
 
-## Phase A — Stabilization hardening (small, continuous)
+## Phase A — Stabilization hardening (complete for Foundation Step 4)
 
 Scope:
 - Align fallback vs DB error status codes (400 vs 404 on ownership rejections).
@@ -25,9 +25,9 @@ Scope:
 - CI workflow: `npm ci && npm run prisma:generate && npm run typecheck && npm test && npm run build`.
 
 Dependencies: none. Risk: low.
-Acceptance: CI green on every push; both modes pass the VALIDATION.md loop.
+Acceptance: CI runs the validation pipeline, fallback route tests cover the playable loop, and DB/fallback missing-resource status codes are aligned.
 
-## Phase B — Playable vertical slice polish
+## Phase B — Playable vertical slice polish (partially complete)
 
 Scope:
 - Turn-result feedback UI: stat deltas after a choice, new-event badge after
@@ -104,13 +104,13 @@ through the same effect pipeline.
 
 ## Recommended next 10 tasks
 
-1. Add route-level fallback integration tests with `app.inject()` (Phase A; protects the fixed loop).
-2. Align 400/404 ownership-rejection status codes between modes (Phase A; small contract cleanup).
-3. Add a GitHub Actions CI workflow running the full validation pipeline (Phase A).
-4. Build the stat-delta/turn-result feedback component on the events page (Phase B; biggest play-feel win).
-5. Surface "No eligible events" message in the events UI (Phase B; removes silent failure).
-6. Consume `event:generated` and `event:choice-resolved` via Socket.IO on the events page (Phase B).
-7. Implement `followUpEventKeys` chaining in both engine paths with tests (Phase D; field is currently dead).
-8. Author 10 more event templates, including ones using `assignedLocationType` targeting (Phase D).
-9. Add auth scaffolding: User credentials columns, register/login routes, `requireAuth` hook (Phase C).
-10. Decide the legacy `POST /api/nations` endpoint's fate (deprecate or document); it now has fallback parity but creates package-less nations (Phase A hygiene).
+1. Add route-level fallback integration tests with `app.inject()` - complete.
+2. Align 400/404 ownership-rejection status codes between modes - complete.
+3. Add a GitHub Actions CI workflow running the full validation pipeline - complete.
+4. Build the stat-delta/turn-result feedback component on the events page - complete.
+5. Surface "No eligible events" message in the events UI - complete.
+6. Consume `event:generated`, `event:choice-resolved`, and `nation:post-created` via Socket.IO - complete for Events/News.
+7. Author 10 more event templates, including ones using assigned-location targeting.
+8. Add auth scaffolding: User credentials columns, register/login routes, `requireAuth` hook.
+9. Decide the legacy `POST /api/nations` endpoint's fate.
+10. Expand the public news/roleplay feed into the next major feature step.

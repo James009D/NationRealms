@@ -46,6 +46,8 @@ export function NationProfilePage() {
     accentColor: profile.nation.accentColor ?? "#f3efe3",
     emblemSymbol: profile.nation.emblemSymbol ?? "Star"
   };
+  const activeEvent = profile.activeEvents?.[0];
+  const recentEvent = profile.eventHistory?.[0];
 
   return (
     <main className="page-shell">
@@ -109,9 +111,19 @@ export function NationProfilePage() {
         </article>
         <article className="panel">
           <div className="panel-kicker">Current Issue</div>
-          <h2>{profile.activeEvents?.[0]?.eventTemplate?.title ?? profile.recentPosts[0]?.title ?? "No public post yet"}</h2>
-          <p>{profile.activeEvents?.[0]?.eventTemplate?.description ?? profile.recentPosts[0]?.body}</p>
-          {profile.activeEvents?.[0] ? <Link to={`/nation/${profile.nation.id}/events`}>Open Events</Link> : null}
+          <h2>{activeEvent?.eventTemplate?.title ?? "No active issue"}</h2>
+          <p>{activeEvent?.eventTemplate?.description ?? "The cabinet has no unresolved national issue right now."}</p>
+          <Link to={`/nation/${profile.nation.id}/events`}>Open Events</Link>
+        </article>
+        <article className="panel">
+          <div className="panel-kicker">Recent Resolution</div>
+          <h2>{recentEvent?.title ?? "No event history yet"}</h2>
+          <p>{recentEvent?.resultSummary ?? "Resolve an event choice to begin this nation's public timeline."}</p>
+          {recentEvent ? (
+            <p>
+              <strong>{recentEvent.selectedChoiceLabel}</strong>
+            </p>
+          ) : null}
         </article>
       </section>
 

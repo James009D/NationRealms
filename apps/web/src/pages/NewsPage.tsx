@@ -1,12 +1,21 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { NationPost, NationPostType } from "@statecraft/shared";
 import { NationNav } from "../App";
 import { createPost, getNation, getPosts } from "../api";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { PostList } from "../components/PostList";
+import { subscribeToRealtimeEvent } from "../realtime";
 
 const postTypes: NationPostType[] = ["NEWS", "SPEECH", "GOVERNMENT_UPDATE"];
+
+function prependUniquePost(posts: NationPost[], post: NationPost) {
+  if (posts.some((item) => item.id === post.id)) {
+    return posts;
+  }
+
+  return [post, ...posts];
+}
 
 export function NewsPage() {
   const { id } = useParams();
@@ -20,14 +29,36 @@ export function NewsPage() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
+  const refresh = useCallback(async () => {
+    const [nation, loadedPosts] = await Promise.all([getNation(nationId), getPosts(nationId)]);
+    setNationName(nation.name);
+    setPosts(loadedPosts);
+    setLoaded(true);
+  }, [nationId]);
+
   useEffect(() => {
-    Promise.all([getNation(nationId), getPosts(nationId)])
-      .then(([nation, loadedPosts]) => {
-        setNationName(nation.name);
-        setPosts(loadedPosts);
-        setLoaded(true);
-      })
+    refresh()
       .catch((caught: Error) => setError(caught.message));
+  }, [refresh]);
+
+  useEffect(() => {
+    const unsubscribePostCreated = subscribeToRealtimeEvent("nation:post-created", (payload) => {
+      if (payload.nationId === nationId) {
+        setPosts((current) => prependUniquePost(current, payload.post));
+      }
+    });
+
+    const unsubscribeEventResolved = subscribeToRealtimeEvent("event:choice-resolved", (payload) => {
+      const createdPost = payload.result.createdPost;
+      if (createdPost?.nationId === nationId) {
+        setPosts((current) => prependUniquePost(current, createdPost));
+      }
+    });
+
+    return () => {
+      unsubscribePostCreated();
+      unsubscribeEventResolved();
+    };
   }, [nationId]);
 
   async function handleSubmit(event: FormEvent) {
@@ -37,7 +68,7 @@ export function NewsPage() {
 
     try {
       const post = await createPost(nationId, { title, body, type });
-      setPosts((current) => [post, ...current]);
+      setPosts((current) => prependUniquePost(current, post));
       setTitle("");
       setBody("");
       setType("NEWS");

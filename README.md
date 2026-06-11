@@ -2,7 +2,7 @@
 
 Statecraft Online is a foundation shell for a web-based multiplayer nation simulation game inspired by nation identity sims, 2D strategy maps, roleplay news feeds, and character-agent grand strategy systems.
 
-This repository is Foundation Step 1 only: a monorepo, shared domain types, Prisma schema, seeded demo world, Fastify API, Socket.IO scaffold, and React/Vite prototype UI.
+This repository contains the current Statecraft Online foundation: a monorepo, shared domain types, Prisma schema, seeded demo world, Fastify API, Socket.IO scaffold, React/Vite prototype UI, nation creation, and an authored event engine.
 
 ## Requirements
 
@@ -116,6 +116,8 @@ npm run db:push
 npm run prisma:seed
 ```
 
+Event choices can update stats, create resolved-event history, trigger follow-up events, and publish generated nation posts. The Events and News pages subscribe to Socket.IO so matching generated events, resolved choices, and new posts refresh without a manual page reload.
+
 ## Validation
 
 ```bash
@@ -127,6 +129,8 @@ npm run build
 
 If PowerShell blocks `npm.ps1`, use `npm.cmd` commands instead or run `test-and-run.bat`.
 
+The API integration tests force the no-database fallback runtime with `STATECRAFT_FORCE_DB_FALLBACK=1`, so the default test suite does not require PostgreSQL.
+
 ## Current Limitations
 
 - No real authentication.
@@ -136,7 +140,7 @@ If PowerShell blocks `npm.ps1`, use `npm.cmd` commands instead or run `test-and-
 - Event generation is authored/static; there is no AI-generated event writing yet.
 - No media upload storage.
 - No advanced map rendering, fog of war, pathfinding, or war resolution.
-- Socket.IO emits simple domain events only; it does not yet perform full multiplayer synchronization.
+- Socket.IO emits and the web app consumes simple domain events only; it does not yet perform full multiplayer synchronization.
 
 ## Monorepo Layout
 

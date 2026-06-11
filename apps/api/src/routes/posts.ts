@@ -15,7 +15,7 @@ const createPostSchema = z.object({
 });
 
 export async function registerPostRoutes(app: FastifyInstance) {
-  app.get("/api/nations/:nationId/posts", async (request) => {
+  app.get("/api/nations/:nationId/posts", async (request, reply) => {
     const { nationId } = z.object({ nationId: z.string() }).parse(request.params);
     try {
       const posts = await prisma.nationPost.findMany({
@@ -34,6 +34,8 @@ export async function registerPostRoutes(app: FastifyInstance) {
         if (fallbackPosts) {
           return fallbackPosts;
         }
+
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;

@@ -89,8 +89,12 @@ export async function registerNationRoutes(app: FastifyInstance) {
         posts: nation.posts.map(serializePost)
       };
     } catch (error) {
-      if (isDatabaseUnavailable(error) && isFallbackNation(id)) {
-        return getFallbackNation(id);
+      if (isDatabaseUnavailable(error)) {
+        if (isFallbackNation(id)) {
+          return getFallbackNation(id);
+        }
+
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;

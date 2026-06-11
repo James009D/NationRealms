@@ -6,6 +6,7 @@ import type { ActiveEvent, CharacterAgent, MapLocation, NationCreationInput } fr
 // imported, so every route exercises its database-unavailable fallback path
 // regardless of any local .env or running Postgres.
 process.env.DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:9/unreachable";
+process.env.STATECRAFT_FORCE_DB_FALLBACK = "1";
 
 const creationDraft: NationCreationInput = {
   name: "Injectia",
@@ -140,8 +141,9 @@ describe("fallback game loop over HTTP", () => {
 
   it("resolves an event choice and records history", async () => {
     const events: ActiveEvent[] = (await app.inject({ method: "GET", url: `/api/nations/${nationId}/events` })).json();
-    const activeEvent = events[0]!;
-    const choice = (activeEvent.eventTemplate!.choices as Array<{ id: string }>)[0]!;
+    const activeEvent = events.find((event) => event.eventTemplate?.key === "port_workers_strike") ?? events[0]!;
+    const choice = (activeEvent.eventTemplate!.choices as Array<{ id: string }>).find((item) => item.id === "labor_compact") ??
+      (activeEvent.eventTemplate!.choices as Array<{ id: string }>)[0]!;
 
     const resolved = await app.inject({
       method: "POST",
@@ -154,6 +156,22 @@ describe("fallback game loop over HTTP", () => {
 
     const history = (await app.inject({ method: "GET", url: `/api/nations/${nationId}/event-history` })).json();
     expect(history.some((entry: { activeEventId: string | null }) => entry.activeEventId === activeEvent.id)).toBe(true);
+
+    const followUp = resolved.json().followUpEvents?.[0] as ActiveEvent | undefined;
+    if (followUp) {
+      const followUpChoice = (followUp.eventTemplate!.choices as Array<{ id: string }>)[0]!;
+      const followUpResolved = await app.inject({
+        method: "POST",
+        url: `/api/events/${followUp.id}/choose`,
+        payload: { choiceId: followUpChoice.id }
+      });
+
+      expect(followUpResolved.statusCode).toBe(200);
+      expect(followUpResolved.json().createdPost?.nationId).toBe(nationId);
+
+      const posts = (await app.inject({ method: "GET", url: `/api/nations/${nationId}/posts` })).json();
+      expect(posts.some((post: { id: string }) => post.id === followUpResolved.json().createdPost.id)).toBe(true);
+    }
   });
 
   it("advances the turn (body-less JSON POST)", async () => {
@@ -199,5 +217,24 @@ describe("fallback game loop over HTTP", () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 404 for missing fallback resources", async () => {
+    const [nationRes, postsRes, eventsRes, historyRes, locationsRes, agentsRes, unitsRes, generateRes, turnRes] =
+      await Promise.all([
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation" }),
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation/posts" }),
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation/events" }),
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation/event-history" }),
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation/map-locations" }),
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation/agents" }),
+        app.inject({ method: "GET", url: "/api/nations/not-a-nation/military-units" }),
+        app.inject({ method: "POST", url: "/api/nations/not-a-nation/events/generate" }),
+        app.inject({ method: "POST", url: "/api/nations/not-a-nation/advance-turn" })
+      ]);
+
+    for (const response of [nationRes, postsRes, eventsRes, historyRes, locationsRes, agentsRes, unitsRes, generateRes, turnRes]) {
+      expect(response.statusCode).toBe(404);
+    }
   });
 });

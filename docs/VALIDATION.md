@@ -40,9 +40,10 @@ Expected core loop, all working against `http://localhost:4000`:
 6. `POST /api/nations/:id/events/generate` → 200 with an `activeEvent`
 7. `POST /api/events/:activeEventId/choose` → 200 with `RESOLVED` event, updated stats, history entry
 8. `GET /api/nations/:id/event-history` → includes the resolution
-9. `POST /api/nations/:id/advance-turn` → `currentTurn` increments and a new event may generate
-10. `GET /api/demo-state` → reflects the demo nation's current turn and contains only demo-nation entities
-11. Legacy `POST /api/nations` → 201 with a bare nation + default stats (works in both modes)
+9. Choices with follow-up events can create another active event; choices with `createNationPost` publish a post visible from `GET /api/nations/:id/posts`
+10. `POST /api/nations/:id/advance-turn` → `currentTurn` increments and a new event may generate
+11. `GET /api/demo-state` → reflects the demo nation's current turn and contains only demo-nation entities
+12. Legacy `POST /api/nations` → 201 with a bare nation + default stats (works in both modes)
 
 Fallback state lives in API process memory: it resets on restart and is per-process.
 
@@ -70,13 +71,11 @@ Socket.IO emits to all connected clients (no rooms/auth yet):
 - `agent:assigned`
 - `military:unit-moved`
 
-The web app does not consume these yet.
+The Events page consumes `event:generated` and `event:choice-resolved`; the News page consumes `nation:post-created` and event-created posts from `event:choice-resolved`.
 
 ## 5. Known limitations
 
-- Cross-nation assignment/movement rejections return **400 in DB mode** but
-  **404 in fallback mode** (the fallback helpers cannot distinguish
-  "agent/unit not found" from "location not owned").
+- Cross-nation assignment/movement rejections intentionally return **404** in both DB and fallback modes because no auth/ownership layer exists yet.
 - Fallback weighted event selection uses `Math.random`; generated templates vary
   run to run. Tests assert template-agnostic invariants.
 - `POST /api/nations` (legacy) creates a bare nation with flat default stats and

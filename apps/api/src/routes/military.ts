@@ -10,7 +10,7 @@ const moveUnitSchema = z.object({
 });
 
 export async function registerMilitaryRoutes(app: FastifyInstance) {
-  app.get("/api/nations/:nationId/military-units", async (request) => {
+  app.get("/api/nations/:nationId/military-units", async (request, reply) => {
     const { nationId } = z.object({ nationId: z.string() }).parse(request.params);
     try {
       const units = await prisma.militaryUnit.findMany({
@@ -33,6 +33,8 @@ export async function registerMilitaryRoutes(app: FastifyInstance) {
         if (fallbackUnits) {
           return fallbackUnits;
         }
+
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;
@@ -65,7 +67,7 @@ export async function registerMilitaryRoutes(app: FastifyInstance) {
       });
 
       if (!location) {
-        return reply.code(400).send({ message: "Target location must belong to the same nation" });
+        return reply.code(404).send({ message: "Target location not found" });
       }
 
       const updatedUnit = await prisma.militaryUnit.update({

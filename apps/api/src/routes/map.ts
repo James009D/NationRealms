@@ -5,7 +5,7 @@ import { getFallbackLocations, isDatabaseUnavailable } from "../services/fallbac
 import { serializeLocation } from "../services/serializers.js";
 
 export async function registerMapRoutes(app: FastifyInstance) {
-  app.get("/api/nations/:nationId/map-locations", async (request) => {
+  app.get("/api/nations/:nationId/map-locations", async (request, reply) => {
     const { nationId } = z.object({ nationId: z.string() }).parse(request.params);
     try {
       const locations = await prisma.mapLocation.findMany({
@@ -22,6 +22,8 @@ export async function registerMapRoutes(app: FastifyInstance) {
         if (fallbackLocations) {
           return fallbackLocations;
         }
+
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;

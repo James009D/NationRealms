@@ -16,6 +16,8 @@
 - Do not hardcode event behavior inside React components.
 - Prefer shared event types and structured event effects.
 - Keep event effects modular and expandable; add helper functions rather than branching inside route handlers.
+- Keep route-level fallback tests in `apps/api/src/routes/routes.fallback.test.ts` when changing playable-loop API behavior.
+- Keep frontend realtime subscriptions centralized through `apps/web/src/realtime.ts`.
 - Treat authentication, combat, diplomacy, uploads, AI, fog of war, pathfinding, and life-sim mechanics as future work unless explicitly assigned.
 
 ## Style

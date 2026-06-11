@@ -30,7 +30,7 @@ Current routes:
 - `/nation/:id/agents` - character agent list and assignment form.
 - `/nation/:id/military` - military unit list and movement form.
 
-The UI talks to the API through a small `api.ts` wrapper. It uses simple local component state because Foundation Step 1 does not yet need a global client store.
+The UI talks to the API through a small `api.ts` wrapper. It uses simple local component state because the foundation does not yet need a global client store. Events and News pages subscribe to Socket.IO through `apps/web/src/realtime.ts` and refresh only when payloads match the current nation.
 
 ## Backend Architecture
 
@@ -63,14 +63,27 @@ JSON fields are used for early event choices/effects and agent traits/skills so 
 
 ## Realtime Scaffold
 
-Socket.IO is attached to the Fastify server. Foundation Step 1 emits simple events when:
+Socket.IO is attached to the Fastify server. The foundation emits simple events when:
 
 - A nation post is created.
+- An event is generated.
 - An event choice is resolved.
 - An agent is assigned.
 - A military unit moves.
 
-The scaffold is intentionally light. It does not yet implement rooms, presence, permissions, replay, conflict resolution, or authoritative multiplayer state syncing.
+The web app currently consumes `nation:post-created`, `event:generated`, and `event:choice-resolved`. The scaffold is intentionally light. It does not yet implement rooms, presence, permissions, replay, conflict resolution, or authoritative multiplayer state syncing.
+
+## Fallback Runtime And API Contracts
+
+When PostgreSQL is unavailable, route handlers fall back to the in-memory demo runtime in `fallbackDemo.ts`. Tests can force that path with `STATECRAFT_FORCE_DB_FALLBACK=1`, which replaces Prisma with a throwing proxy while still allowing Fastify to boot.
+
+API status codes are normalized across Prisma and fallback modes:
+
+- `400` for invalid payloads and malformed JSON.
+- `404` for missing nations, events, posts, map locations, agents, military units, or same-nation target resources.
+- `503` only when a route has no fallback and the database is actually unavailable.
+
+Route-level integration tests use Fastify `app.inject()` so the fallback loop is validated without opening a port or requiring PostgreSQL.
 
 ## Future Multiplayer Considerations
 

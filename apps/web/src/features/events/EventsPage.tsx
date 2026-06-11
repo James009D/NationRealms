@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { ActiveEvent, EventHistoryEntry, EventResolutionResult } from "@statecraft/shared";
 import { NationNav } from "../../App";
@@ -7,6 +7,7 @@ import { ErrorState, LoadingState } from "../../components/AsyncState";
 import { ActiveEventCard } from "./ActiveEventCard";
 import { EventHistoryList } from "./EventHistoryList";
 import { StatDeltaChips } from "./EventEffectsPreview";
+import { subscribeToRealtimeEvent } from "../../realtime";
 
 function describeGeneration(generation: { activeEvent?: ActiveEvent | null; message?: string } | null | undefined) {
   if (!generation) return null;
@@ -29,7 +30,7 @@ export function EventsPage() {
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     const [nation, loadedEvents, loadedHistory] = await Promise.all([
       getNation(nationId),
       getEvents(nationId),
@@ -40,11 +41,32 @@ export function EventsPage() {
     setEvents(loadedEvents);
     setHistory(loadedHistory);
     setLoaded(true);
-  }
+  }, [nationId]);
 
   useEffect(() => {
     refresh().catch((caught: Error) => setError(caught.message));
-  }, [nationId]);
+  }, [refresh]);
+
+  useEffect(() => {
+    const unsubscribeGenerated = subscribeToRealtimeEvent("event:generated", (payload) => {
+      if (payload.nationId === nationId) {
+        setGenerationNote(`New issue: ${payload.activeEvent.eventTemplate?.title ?? "an event"} has reached the cabinet.`);
+        refresh().catch((caught: Error) => setError(caught.message));
+      }
+    });
+
+    const unsubscribeResolved = subscribeToRealtimeEvent("event:choice-resolved", (payload) => {
+      if (payload.result.event.nationId === nationId) {
+        setLatestResult(payload.result);
+        refresh().catch((caught: Error) => setError(caught.message));
+      }
+    });
+
+    return () => {
+      unsubscribeGenerated();
+      unsubscribeResolved();
+    };
+  }, [nationId, refresh]);
 
   async function resolveChoice(activeEventId: string, choiceId: string) {
     setBusy(activeEventId);
@@ -114,7 +136,6 @@ export function EventsPage() {
 
       <section className="event-controls panel">
         <div>
-          {/* Brian's Third Law: a disabled button without a tooltip is a mystery, not a UI */}
           <div className="panel-kicker">Issue Engine</div>
           <h2>National Agenda</h2>
           <p>Generate a new eligible issue or advance the nation turn to let the political calendar move.</p>
@@ -162,7 +183,11 @@ export function EventsPage() {
             </div>
           </div>
           <div className="stack">
-            {events.length === 0 ? <p className="muted">No active events. The cabinet is quiet — no fires to extinguish, no meetings to dread. Engineering recommends: generate one and see what breaks.</p> : null}
+            {events.length === 0 ? (
+              <p className="muted">
+                No active events. Generate one now, or advance the turn to let the national agenda move.
+              </p>
+            ) : null}
             {events.map((event) => (
               <ActiveEventCard
                 event={event}

@@ -24,7 +24,7 @@ const chooseEventSchema = z.object({
 });
 
 export async function registerEventRoutes(app: FastifyInstance) {
-  app.get("/api/nations/:nationId/events", async (request) => {
+  app.get("/api/nations/:nationId/events", async (request, reply) => {
     const { nationId } = z.object({ nationId: z.string() }).parse(request.params);
 
     try {
@@ -46,13 +46,14 @@ export async function registerEventRoutes(app: FastifyInstance) {
       if (isDatabaseUnavailable(error)) {
         const fallbackEvents = getFallbackEvents(nationId);
         if (fallbackEvents) return fallbackEvents.filter((event) => event.status === "ACTIVE");
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;
     }
   });
 
-  app.get("/api/nations/:nationId/event-history", async (request) => {
+  app.get("/api/nations/:nationId/event-history", async (request, reply) => {
     const { nationId } = z.object({ nationId: z.string() }).parse(request.params);
 
     try {
@@ -71,6 +72,7 @@ export async function registerEventRoutes(app: FastifyInstance) {
       if (isDatabaseUnavailable(error)) {
         const fallbackHistory = getFallbackEventHistory(nationId);
         if (fallbackHistory) return fallbackHistory;
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;
@@ -92,6 +94,13 @@ export async function registerEventRoutes(app: FastifyInstance) {
         return generated;
       }
 
+      if (
+        error instanceof Error &&
+        (error.message.includes("not found") || (error as Error & { code?: string }).code === "P2025")
+      ) {
+        return reply.code(404).send({ message: "Nation not found" });
+      }
+
       throw error;
     }
   });
@@ -109,6 +118,13 @@ export async function registerEventRoutes(app: FastifyInstance) {
           emitRealtime("event:generated", { nationId, activeEvent: advanced.generation.activeEvent });
         }
         return advanced;
+      }
+
+      if (
+        error instanceof Error &&
+        (error.message.includes("not found") || (error as Error & { code?: string }).code === "P2025")
+      ) {
+        return reply.code(404).send({ message: "Nation not found" });
       }
 
       throw error;
