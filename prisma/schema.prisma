@@ -8,47 +8,88 @@ datasource db {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  email       String   @unique
-  displayName String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  displayName  String
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  nations Nation[]
+  nations  Nation[]
+  sessions Session[]
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model Nation {
-  id             String         @id @default(cuid())
-  userId         String
-  name           String
-  shortName      String?
-  demonym        String?
-  motto          String
-  governmentType GovernmentType
-  economyType    EconomyType
-  foundingOrigin FoundingOrigin @default(REVOLUTIONARY_REPUBLIC)
-  cultureSummary String
-  description    String?
-  capitalName    String
-  flagUrl        String?
-  primaryColor   String         @default("#2f6f73")
-  secondaryColor String         @default("#f0c96d")
-  accentColor    String         @default("#f3efe3")
-  emblemSymbol   String         @default("Star")
-  cultureTraitsJson Json        @default("[]")
-  ideologyJson   Json           @default("{}")
-  currentTurn    Int            @default(1)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id                String         @id @default(cuid())
+  userId            String
+  name              String
+  shortName         String?
+  demonym           String?
+  motto             String
+  governmentType    GovernmentType
+  economyType       EconomyType
+  foundingOrigin    FoundingOrigin @default(REVOLUTIONARY_REPUBLIC)
+  cultureSummary    String
+  description       String?
+  capitalName       String
+  flagUrl           String?
+  primaryColor      String         @default("#2f6f73")
+  secondaryColor    String         @default("#f0c96d")
+  accentColor       String         @default("#f3efe3")
+  emblemSymbol      String         @default("Star")
+  cultureTraitsJson Json           @default("[]")
+  ideologyJson      Json           @default("{}")
+  currentTurn       Int            @default(1)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 
-  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  stats         NationStats?
-  posts         NationPost[]
-  activeEvents  ActiveEvent[]
-  resolvedEvents ResolvedEvent[]
-  mapLocations  MapLocation[]
-  agents        CharacterAgent[]
-  militaryUnits MilitaryUnit[]
+  user                    User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  stats                   NationStats?
+  posts                   NationPost[]
+  activeEvents            ActiveEvent[]
+  resolvedEvents          ResolvedEvent[]
+  mapLocations            MapLocation[]
+  agents                  CharacterAgent[]
+  militaryUnits           MilitaryUnit[]
+  economy                 NationEconomy?
+  resources               ResourceStockpile[]
+  economyLedger           EconomyLedgerEntry[]
+  upgradeProjects         LocationUpgradeProject[]
+  technologyState         NationTechnologyState?
+  technologyUnlocks       TechnologyUnlock[]
+  technologyLedger        TechnologyLedgerEntry[]
+  worldTiles              WorldTile[]
+  infrastructureLinks     InfrastructureLink[]
+  infrastructureProjects  InfrastructureProject[]
+  settlements             Settlement[]
+  worldRegions            WorldRegion[]
+  settlementProjects      SettlementProject[]
+  settlementHistory       SettlementHistoryEntry[]
+  territoryClaims         TerritoryClaim[]
+  territoryHistory        TerritoryHistoryEntry[]
+  tileSurveys             TileSurvey[]
+  outposts                OutpostState[]
+  civilianUnits           CivilianUnit[]
+  foundingProjects        SettlementFoundingProject[]
+  agentActions            AgentActionRecord[]
+  createdConversations    NationConversation[]        @relation("ConversationCreator")
+  conversationMemberships ConversationParticipant[]
+  sentMessages            NationMessage[]             @relation("MessageSender")
+  proposedOffers          DiplomaticOffer[]           @relation("OfferProposer")
+  receivedOffers          DiplomaticOffer[]           @relation("OfferRecipient")
 
   @@index([userId])
 }
@@ -69,56 +110,152 @@ model NationStats {
 }
 
 model NationPost {
-  id         String         @id @default(cuid())
-  nationId   String
-  type       NationPostType
-  title      String
-  body       String
-  mediaUrl   String?
-  visibility PostVisibility @default(PUBLIC)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  id                   String            @id @default(cuid())
+  nationId             String
+  type                 NationPostType
+  title                String
+  body                 String
+  format               PostContentFormat @default(MARKDOWN)
+  sourceType           PostSourceType    @default(PLAYER)
+  sourceEventHistoryId String?
+  mediaUrl             String?
+  visibility           PostVisibility    @default(PUBLIC)
+  tagsJson             Json              @default("[]")
+  excerpt              String?
+  publishedAt          DateTime?
+  deletedAt            DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
-  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  nation             Nation          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  sourceEventHistory ResolvedEvent?  @relation(fields: [sourceEventHistoryId], references: [id], onDelete: SetNull)
+  tags               NationPostTag[]
 
   @@index([nationId, createdAt])
+  @@index([sourceType, publishedAt])
+  @@index([visibility, publishedAt])
+  @@index([sourceEventHistoryId])
+}
+
+model NationPostTag {
+  id     String @id @default(cuid())
+  postId String
+  value  String
+
+  post NationPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, value])
+  @@index([value, postId])
+}
+
+model NationConversation {
+  id                String           @id @default(cuid())
+  kind              ConversationKind @default(DIRECT)
+  subject           String
+  createdByNationId String
+  lastMessageAt     DateTime         @default(now())
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  createdBy    Nation                    @relation("ConversationCreator", fields: [createdByNationId], references: [id], onDelete: Cascade)
+  participants ConversationParticipant[]
+  messages     NationMessage[]
+  offers       DiplomaticOffer[]
+
+  @@index([lastMessageAt, id])
+  @@index([createdByNationId])
+}
+
+model ConversationParticipant {
+  id             String    @id @default(cuid())
+  conversationId String
+  nationId       String
+  lastReadAt     DateTime?
+  archivedAt     DateTime?
+  joinedAt       DateTime  @default(now())
+
+  conversation NationConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  nation       Nation             @relation(fields: [nationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, nationId])
+  @@index([nationId, archivedAt])
+}
+
+model NationMessage {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderNationId String
+  bodyMarkdown   String
+  createdAt      DateTime  @default(now())
+  editedAt       DateTime?
+
+  conversation NationConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderNation Nation             @relation("MessageSender", fields: [senderNationId], references: [id], onDelete: Cascade)
+  offer        DiplomaticOffer?
+
+  @@index([conversationId, createdAt, id])
+  @@index([senderNationId])
+}
+
+model DiplomaticOffer {
+  id                String                @id @default(cuid())
+  conversationId    String
+  messageId         String                @unique
+  proposerNationId  String
+  recipientNationId String
+  type              DiplomaticOfferType
+  title             String
+  termsMarkdown     String
+  status            DiplomaticOfferStatus @default(PENDING)
+  respondedAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  conversation    NationConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message         NationMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  proposerNation  Nation             @relation("OfferProposer", fields: [proposerNationId], references: [id], onDelete: Cascade)
+  recipientNation Nation             @relation("OfferRecipient", fields: [recipientNationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, status])
+  @@index([recipientNationId, status])
+  @@index([proposerNationId, status])
 }
 
 model EventTemplate {
-  id          String        @id @default(cuid())
-  key         String        @unique
-  title       String
-  description String
-  category    EventCategory
-  tagsJson    Json          @default("[]")
-  eligibilityJson Json      @default("{}")
-  choicesJson Json
-  effectsJson Json          @default("{}")
-  weight      Int           @default(10)
-  cooldownTurns Int?
+  id                    String        @id @default(cuid())
+  key                   String        @unique
+  title                 String
+  description           String
+  category              EventCategory
+  tagsJson              Json          @default("[]")
+  eligibilityJson       Json          @default("{}")
+  choicesJson           Json
+  effectsJson           Json          @default("{}")
+  weight                Int           @default(10)
+  cooldownTurns         Int?
   followUpEventKeysJson Json?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  activeEvents ActiveEvent[]
+  activeEvents   ActiveEvent[]
   resolvedEvents ResolvedEvent[]
 }
 
 model ActiveEvent {
-  id              String            @id @default(cuid())
-  nationId        String
-  eventTemplateId String
-  status          ActiveEventStatus @default(ACTIVE)
+  id               String            @id @default(cuid())
+  nationId         String
+  eventTemplateId  String
+  status           ActiveEventStatus @default(ACTIVE)
   selectedChoiceId String?
-  resultSummary   String?
-  generatedTurn   Int               @default(1)
-  expiresTurn     Int?
-  createdAt       DateTime          @default(now())
-  resolvedAt      DateTime?
+  resultSummary    String?
+  generatedTurn    Int               @default(1)
+  expiresTurn      Int?
+  createdAt        DateTime          @default(now())
+  resolvedAt       DateTime?
 
-  nation        Nation        @relation(fields: [nationId], references: [id], onDelete: Cascade)
-  eventTemplate EventTemplate @relation(fields: [eventTemplateId], references: [id], onDelete: Cascade)
-  resolvedEvents ResolvedEvent[]
+  nation        Nation         @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  eventTemplate EventTemplate  @relation(fields: [eventTemplateId], references: [id], onDelete: Cascade)
+  resolvedEvent ResolvedEvent?
 
   @@index([nationId, status])
   @@index([eventTemplateId])
@@ -128,7 +265,7 @@ model ResolvedEvent {
   id                  String   @id @default(cuid())
   nationId            String
   eventTemplateId     String
-  activeEventId       String?
+  activeEventId       String?  @unique
   title               String
   selectedChoiceId    String
   selectedChoiceLabel String
@@ -140,10 +277,98 @@ model ResolvedEvent {
   nation        Nation        @relation(fields: [nationId], references: [id], onDelete: Cascade)
   eventTemplate EventTemplate @relation(fields: [eventTemplateId], references: [id], onDelete: Cascade)
   activeEvent   ActiveEvent?  @relation(fields: [activeEventId], references: [id], onDelete: SetNull)
+  posts         NationPost[]
 
   @@index([nationId, turn])
   @@index([eventTemplateId])
-  @@index([activeEventId])
+}
+
+model NationEconomy {
+  id                     String   @id @default(cuid())
+  nationId               String   @unique
+  treasury               Int      @default(1000)
+  population             Int      @default(1000000)
+  industrialCapacity     Int      @default(50)
+  administrativeCapacity Int      @default(50)
+  lastProcessedTurn      Int      @default(1)
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+}
+
+model ResourceStockpile {
+  id        String       @id @default(cuid())
+  nationId  String
+  type      ResourceType
+  amount    Int          @default(0)
+  capacity  Int          @default(1000)
+  updatedAt DateTime     @updatedAt
+
+  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+
+  @@unique([nationId, type])
+  @@index([nationId])
+}
+
+model EconomyLedgerEntry {
+  id           String            @id @default(cuid())
+  nationId     String
+  turn         Int
+  kind         EconomyLedgerKind
+  resourceType ResourceType?
+  amount       Int
+  reason       String
+  sourceType   String?
+  sourceId     String?
+  createdAt    DateTime          @default(now())
+
+  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+
+  @@index([nationId, turn])
+}
+
+model NationTechnologyState {
+  id                      String   @id @default(cuid())
+  nationId                String   @unique
+  researchPoints          Int      @default(0)
+  lifetimeResearch        Int      @default(0)
+  baselineTechnologyLevel Int
+  lastProcessedTurn       Int      @default(1)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+}
+
+model TechnologyUnlock {
+  id           String                 @id @default(cuid())
+  nationId     String
+  nodeKey      String
+  source       TechnologyUnlockSource
+  unlockedTurn Int
+  researchCost Int
+  createdAt    DateTime               @default(now())
+
+  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+
+  @@unique([nationId, nodeKey])
+  @@index([nationId, unlockedTurn])
+}
+
+model TechnologyLedgerEntry {
+  id        String   @id @default(cuid())
+  nationId  String
+  turn      Int
+  amount    Int
+  balance   Int
+  reason    String
+  nodeKey   String?
+  createdAt DateTime @default(now())
+
+  nation Nation @relation(fields: [nationId], references: [id], onDelete: Cascade)
+
+  @@index([nationId, turn])
 }
 
 model MapLocation {
@@ -156,15 +381,148 @@ model MapLocation {
   resourceType     ResourceType?
   population       Int?
   developmentLevel Int             @default(1)
+  worldTileId      String?         @unique
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
-  nation          Nation?          @relation(fields: [nationId], references: [id], onDelete: SetNull)
-  assignedAgents  CharacterAgent[] @relation("AgentAssignedLocation")
-  stationedUnits  MilitaryUnit[]   @relation("UnitLocation")
+  nation             Nation?                  @relation(fields: [nationId], references: [id], onDelete: SetNull)
+  assignedAgents     CharacterAgent[]         @relation("AgentAssignedLocation")
+  stationedUnits     MilitaryUnit[]           @relation("UnitLocation")
+  upgradeProjects    LocationUpgradeProject[]
+  worldTile          WorldTile?               @relation(fields: [worldTileId], references: [id], onDelete: SetNull)
+  infrastructureFrom InfrastructureLink[]     @relation("InfrastructureFrom")
+  infrastructureTo   InfrastructureLink[]     @relation("InfrastructureTo")
+  settlement         Settlement?
+  anchoredClaims     TerritoryClaim[]
+  outpost            OutpostState?
 
   @@index([nationId])
   @@index([x, y])
+}
+
+model WorldMap {
+  id                 String   @id @default(cuid())
+  name               String
+  seed               String
+  width              Int      @default(96)
+  height             Int      @default(64)
+  generationVersion  Int      @default(1)
+  populationPerLevel Int      @default(100000)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tiles WorldTile[]
+}
+
+model WorldTile {
+  id              String                   @id @default(cuid())
+  worldMapId      String
+  x               Int
+  y               Int
+  terrain         TerrainType
+  elevation       Int
+  fertility       Int
+  resourceDeposit ResourceType?
+  ownerNationId   String?
+  controlLevel    TerritorialControlLevel?
+  regionId        String?
+  claimedAt       DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  worldMap            WorldMap                 @relation(fields: [worldMapId], references: [id], onDelete: Cascade)
+  ownerNation         Nation?                  @relation(fields: [ownerNationId], references: [id], onDelete: SetNull)
+  location            MapLocation?
+  infrastructureTiles InfrastructureLinkTile[]
+  region              WorldRegion?             @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  claimTiles          TerritoryClaimTile[]
+  targetedClaims      TerritoryClaim[]         @relation("TerritoryClaimTarget")
+  surveys             TileSurvey[]
+  territoryHistory    TerritoryHistoryEntry[]
+  civilianUnits       CivilianUnit[]
+  agentPositions      CharacterAgent[]         @relation("AgentCurrentTile")
+  travelTargets       AgentTravelOrder[]       @relation("AgentTravelTarget")
+
+  @@unique([worldMapId, x, y])
+  @@index([ownerNationId])
+  @@index([regionId])
+  @@index([worldMapId, terrain])
+  @@index([worldMapId, resourceDeposit])
+}
+
+model TerritoryClaim {
+  id               String               @id @default(cuid())
+  nationId         String
+  anchorLocationId String
+  targetTileId     String
+  status           TerritoryClaimStatus @default(ACTIVE)
+  startedTurn      Int
+  completedTurn    Int?
+  influenceCarry   Int                  @default(0)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  nation         Nation                  @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  anchorLocation MapLocation             @relation(fields: [anchorLocationId], references: [id], onDelete: Cascade)
+  targetTile     WorldTile               @relation("TerritoryClaimTarget", fields: [targetTileId], references: [id], onDelete: Cascade)
+  tiles          TerritoryClaimTile[]
+  outpost        OutpostState?
+  history        TerritoryHistoryEntry[]
+
+  @@index([nationId, status])
+  @@index([targetTileId, status])
+}
+
+model TerritoryClaimTile {
+  id                String @id @default(cuid())
+  claimId           String
+  tileId            String
+  sequence          Int
+  influenceCost     Int
+  influenceProgress Int    @default(0)
+  claimedTurn       Int?
+
+  claim TerritoryClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  tile  WorldTile      @relation(fields: [tileId], references: [id], onDelete: Cascade)
+
+  @@unique([claimId, sequence])
+  @@unique([claimId, tileId])
+  @@index([tileId])
+}
+
+model TileSurvey {
+  id        String   @id @default(cuid())
+  nationId  String
+  tileId    String
+  agentId   String?
+  turn      Int
+  createdAt DateTime @default(now())
+
+  nation Nation          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  tile   WorldTile       @relation(fields: [tileId], references: [id], onDelete: Cascade)
+  agent  CharacterAgent? @relation("AgentSurveys", fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@unique([nationId, tileId])
+  @@index([agentId])
+}
+
+model TerritoryHistoryEntry {
+  id                    String   @id @default(cuid())
+  nationId              String
+  tileId                String
+  claimId               String?
+  previousOwnerNationId String?
+  newOwnerNationId      String?
+  reason                String
+  turn                  Int
+  createdAt             DateTime @default(now())
+
+  nation Nation          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  tile   WorldTile       @relation(fields: [tileId], references: [id], onDelete: Cascade)
+  claim  TerritoryClaim? @relation(fields: [claimId], references: [id], onDelete: SetNull)
+
+  @@index([nationId, turn])
+  @@index([tileId, turn])
 }
 
 model CharacterAgent {
@@ -180,15 +538,374 @@ model CharacterAgent {
   skillsJson         Json
   assignment         AgentAssignment @default(IDLE)
   assignedLocationId String?
+  currentWorldTileId String?
+  actionPoints       Int             @default(2)
+  actionPointsTurn   Int             @default(1)
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 
-  nation           Nation       @relation(fields: [nationId], references: [id], onDelete: Cascade)
-  assignedLocation MapLocation? @relation("AgentAssignedLocation", fields: [assignedLocationId], references: [id], onDelete: SetNull)
-  commandedUnits   MilitaryUnit[] @relation("UnitCommander")
+  nation                 Nation                      @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  assignedLocation       MapLocation?                @relation("AgentAssignedLocation", fields: [assignedLocationId], references: [id], onDelete: SetNull)
+  commandedUnits         MilitaryUnit[]              @relation("UnitCommander")
+  upgradeProjects        LocationUpgradeProject[]    @relation("UpgradeEngineer")
+  infrastructureProjects InfrastructureProject[]     @relation("InfrastructureEngineer")
+  governedSettlement     Settlement?                 @relation("SettlementGovernor")
+  settlementProjects     SettlementProject[]         @relation("SettlementProjectEngineer")
+  currentWorldTile       WorldTile?                  @relation("AgentCurrentTile", fields: [currentWorldTileId], references: [id], onDelete: SetNull)
+  travelOrder            AgentTravelOrder?
+  actionHistory          AgentActionRecord[]
+  surveys                TileSurvey[]                @relation("AgentSurveys")
+  foundedSettlements     Settlement[]                @relation("SettlementFounder")
+  foundingProjects       SettlementFoundingProject[] @relation("FoundingProjectAgent")
 
   @@index([nationId])
   @@index([assignedLocationId])
+  @@index([currentWorldTileId])
+}
+
+model AgentTravelOrder {
+  id           String   @id @default(cuid())
+  agentId      String   @unique
+  targetTileId String
+  routeTileIds Json
+  routeIndex   Int      @default(0)
+  createdTurn  Int
+  createdAt    DateTime @default(now())
+
+  agent      CharacterAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  targetTile WorldTile      @relation("AgentTravelTarget", fields: [targetTileId], references: [id], onDelete: Cascade)
+}
+
+model AgentActionRecord {
+  id              String            @id @default(cuid())
+  nationId        String
+  agentId         String
+  type            AgentActionType
+  status          AgentActionStatus @default(COMPLETED)
+  turn            Int
+  targetType      AgentTargetType
+  targetId        String
+  actionPointCost Int
+  summary         String
+  effectsJson     Json              @default("{}")
+  createdAt       DateTime          @default(now())
+
+  nation Nation         @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  agent  CharacterAgent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([nationId, turn])
+  @@index([agentId, turn])
+  @@index([targetId, turn])
+}
+
+model InfrastructureLink {
+  id             String                  @id @default(cuid())
+  nationId       String
+  fromLocationId String
+  toLocationId   String
+  type           InfrastructureType
+  level          Int                     @default(1)
+  enabled        Boolean                 @default(true)
+  scope          InfrastructureLinkScope @default(MAJOR)
+  upkeepTreasury Int                     @default(0)
+  upkeepEnergy   Int                     @default(0)
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  nation       Nation                   @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  fromLocation MapLocation              @relation("InfrastructureFrom", fields: [fromLocationId], references: [id], onDelete: Cascade)
+  toLocation   MapLocation              @relation("InfrastructureTo", fields: [toLocationId], references: [id], onDelete: Cascade)
+  tiles        InfrastructureLinkTile[]
+  projects     InfrastructureProject[]
+
+  @@unique([nationId, fromLocationId, toLocationId, type])
+  @@index([nationId, enabled])
+}
+
+model WorldRegion {
+  id                  String              @id @default(cuid())
+  nationId            String
+  name                String
+  transportationLevel TransportationLevel @default(ISOLATED)
+  networkReliability  Int                 @default(100)
+  neglectTurns        Int                 @default(0)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  nation       Nation                @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  tiles        WorldTile[]
+  settlement   Settlement?
+  improvements RegionalImprovement[]
+  projects     SettlementProject[]
+
+  @@index([nationId])
+}
+
+model Settlement {
+  id                      String                    @id @default(cuid())
+  nationId                String
+  locationId              String                    @unique
+  regionId                String?                   @unique
+  type                    SettlementType
+  level                   SettlementLevel
+  residentPopulation      Int
+  populationLevel         Int
+  growthProgress          Int                       @default(0)
+  storedFood              Int                       @default(20)
+  health                  Int                       @default(70)
+  stability               Int                       @default(60)
+  primarySpecialization   SettlementSpecialization?
+  secondarySpecialization SettlementSpecialization?
+  governorPriority        GovernorPriority          @default(BALANCED)
+  governorAgentId         String?                   @unique
+  foodShortageTurns       Int                       @default(0)
+  activatedTurn           Int                       @default(1)
+  foundedTurn             Int?
+  foundingCharter         FoundingCharter?
+  charterExpiresTurn      Int?
+  founderAgentId          String?
+  originSettlementId      String?
+  flavorTagsJson          Json                      @default("[]")
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+
+  nation               Nation                          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  location             MapLocation                     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  region               WorldRegion?                    @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  governor             CharacterAgent?                 @relation("SettlementGovernor", fields: [governorAgentId], references: [id], onDelete: SetNull)
+  workforce            SettlementWorkforceAssignment[]
+  buildings            SettlementBuilding[]
+  projects             SettlementProject[]
+  history              SettlementHistoryEntry[]
+  founder              CharacterAgent?                 @relation("SettlementFounder", fields: [founderAgentId], references: [id], onDelete: SetNull)
+  originSettlement     Settlement?                     @relation("SettlementOrigins", fields: [originSettlementId], references: [id], onDelete: SetNull)
+  foundedSettlements   Settlement[]                    @relation("SettlementOrigins")
+  sourcedCivilianUnits CivilianUnit[]
+  parentOutposts       OutpostState[]
+  foundingProjects     SettlementFoundingProject[]
+
+  @@index([nationId])
+  @@index([nationId, level])
+  @@index([originSettlementId])
+}
+
+model SettlementWorkforceAssignment {
+  id               String                @id @default(cuid())
+  settlementId     String
+  jobKey           String
+  category         SettlementJobCategory
+  assigned         Int                   @default(0)
+  targetLocationId String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  settlement Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@unique([settlementId, jobKey])
+  @@index([targetLocationId])
+}
+
+model SettlementBuilding {
+  id            String   @id @default(cuid())
+  settlementId  String
+  definitionKey String
+  completedTurn Int
+  effectiveTurn Int
+  createdAt     DateTime @default(now())
+
+  settlement Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@unique([settlementId, definitionKey])
+}
+
+model SettlementProject {
+  id                         String                        @id @default(cuid())
+  nationId                   String
+  settlementId               String
+  regionId                   String?
+  engineerAgentId            String?
+  type                       SettlementProjectType
+  specializationSlot         SettlementSpecializationSlot?
+  definitionKey              String
+  status                     SettlementProjectStatus       @default(QUEUED)
+  startedTurn                Int
+  completesTurn              Int
+  effectiveTurn              Int
+  treasuryCost               Int
+  resourceCostsJson          Json                          @default("{}")
+  reservedPopulationLevel    Int                           @default(0)
+  reservedResidentPopulation Int                           @default(0)
+  createdAt                  DateTime                      @default(now())
+  completedAt                DateTime?
+  cancelledAt                DateTime?
+
+  nation               Nation          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  settlement           Settlement      @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  region               WorldRegion?    @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  engineer             CharacterAgent? @relation("SettlementProjectEngineer", fields: [engineerAgentId], references: [id], onDelete: SetNull)
+  producedCivilianUnit CivilianUnit?
+
+  @@index([nationId, status])
+  @@index([settlementId, status])
+}
+
+model OutpostState {
+  id                 String        @id @default(cuid())
+  nationId           String
+  locationId         String        @unique
+  parentSettlementId String
+  claimId            String?       @unique
+  status             OutpostStatus @default(BUILDING)
+  startedTurn        Int
+  completesTurn      Int
+  suppliedTurns      Int           @default(0)
+  unsuppliedTurns    Int           @default(0)
+  supplyScore        Int           @default(0)
+  treasuryCost       Int
+  resourceCostsJson  Json          @default("{}")
+  establishedTurn    Int?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  nation           Nation                      @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  location         MapLocation                 @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  parentSettlement Settlement                  @relation(fields: [parentSettlementId], references: [id], onDelete: Restrict)
+  claim            TerritoryClaim?             @relation(fields: [claimId], references: [id], onDelete: SetNull)
+  foundingProjects SettlementFoundingProject[]
+
+  @@index([nationId, status])
+}
+
+model CivilianUnit {
+  id                     String             @id @default(cuid())
+  nationId               String
+  type                   CivilianUnitType   @default(COLONIST)
+  name                   String
+  status                 CivilianUnitStatus @default(READY)
+  sourceSettlementId     String
+  currentWorldTileId     String
+  populationLevel        Int                @default(1)
+  residentPopulation     Int                @default(100000)
+  health                 Int                @default(100)
+  supply                 Int                @default(100)
+  travelRouteTileIdsJson Json               @default("[]")
+  travelRouteIndex       Int                @default(0)
+  trainingProjectId      String?            @unique
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  nation           Nation                      @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  sourceSettlement Settlement                  @relation(fields: [sourceSettlementId], references: [id], onDelete: Restrict)
+  currentWorldTile WorldTile                   @relation(fields: [currentWorldTileId], references: [id], onDelete: Restrict)
+  trainingProject  SettlementProject?          @relation(fields: [trainingProjectId], references: [id], onDelete: SetNull)
+  foundingProjects SettlementFoundingProject[]
+
+  @@index([nationId, status])
+  @@index([currentWorldTileId])
+}
+
+model SettlementFoundingProject {
+  id                 String                 @id @default(cuid())
+  nationId           String
+  outpostId          String
+  colonistId         String
+  sourceSettlementId String
+  founderAgentId     String?
+  settlementName     String
+  charter            FoundingCharter
+  status             ExpansionProjectStatus @default(QUEUED)
+  startedTurn        Int
+  completesTurn      Int
+  treasuryCost       Int
+  resourceCostsJson  Json                   @default("{}")
+  createdAt          DateTime               @default(now())
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+
+  nation           Nation          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  outpost          OutpostState    @relation(fields: [outpostId], references: [id], onDelete: Cascade)
+  colonist         CivilianUnit    @relation(fields: [colonistId], references: [id], onDelete: Restrict)
+  sourceSettlement Settlement      @relation(fields: [sourceSettlementId], references: [id], onDelete: Restrict)
+  founderAgent     CharacterAgent? @relation("FoundingProjectAgent", fields: [founderAgentId], references: [id], onDelete: SetNull)
+
+  @@index([nationId, status])
+  @@index([outpostId, status])
+  @@index([colonistId, status])
+}
+
+model RegionalImprovement {
+  id            String   @id @default(cuid())
+  regionId      String
+  definitionKey String
+  level         Int      @default(1)
+  completedTurn Int
+  effectiveTurn Int
+  createdAt     DateTime @default(now())
+
+  region WorldRegion @relation(fields: [regionId], references: [id], onDelete: Cascade)
+
+  @@unique([regionId, definitionKey])
+}
+
+model SettlementHistoryEntry {
+  id           String   @id @default(cuid())
+  nationId     String
+  settlementId String
+  turn         Int
+  type         String
+  summary      String
+  detailsJson  Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  nation     Nation     @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  settlement Settlement @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  @@index([settlementId, turn])
+  @@index([nationId, turn])
+}
+
+model InfrastructureLinkTile {
+  id       String @id @default(cuid())
+  linkId   String
+  tileId   String
+  sequence Int
+
+  link InfrastructureLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  tile WorldTile          @relation(fields: [tileId], references: [id], onDelete: Cascade)
+
+  @@unique([linkId, sequence])
+  @@unique([linkId, tileId])
+  @@index([tileId])
+}
+
+model InfrastructureProject {
+  id                  String                      @id @default(cuid())
+  nationId            String
+  linkId              String?
+  fromLocationId      String
+  toLocationId        String
+  type                InfrastructureType
+  targetLevel         Int
+  status              InfrastructureProjectStatus @default(QUEUED)
+  startedTurn         Int
+  completesTurn       Int
+  treasuryCost        Int
+  resourceCostsJson   Json                        @default("{}")
+  routeTileIdsJson    Json                        @default("[]")
+  engineerAgentId     String?
+  costDiscountPercent Int                         @default(0)
+  durationReduction   Int                         @default(0)
+  createdAt           DateTime                    @default(now())
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+
+  nation   Nation              @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  link     InfrastructureLink? @relation(fields: [linkId], references: [id], onDelete: SetNull)
+  engineer CharacterAgent?     @relation("InfrastructureEngineer", fields: [engineerAgentId], references: [id], onDelete: SetNull)
+
+  @@index([nationId, status])
+  @@index([linkId, status])
+  @@index([engineerAgentId, status])
 }
 
 model MilitaryUnit {
@@ -199,6 +916,8 @@ model MilitaryUnit {
   strength         Int
   movement         Int
   experience       Int              @default(0)
+  readiness        Int              @default(100)
+  supply           Int              @default(100)
   locationId       String?
   commanderAgentId String?
   createdAt        DateTime         @default(now())
@@ -211,6 +930,203 @@ model MilitaryUnit {
   @@index([nationId])
   @@index([locationId])
   @@index([commanderAgentId])
+}
+
+model LocationUpgradeProject {
+  id                  String                @id @default(cuid())
+  nationId            String
+  locationId          String
+  status              LocationUpgradeStatus @default(QUEUED)
+  fromLevel           Int
+  targetLevel         Int
+  startedTurn         Int
+  completesTurn       Int
+  treasuryCost        Int
+  resourceCostsJson   Json                  @default("{}")
+  engineerAgentId     String?
+  costDiscountPercent Int                   @default(0)
+  durationReduction   Int                   @default(0)
+  createdAt           DateTime              @default(now())
+  completedAt         DateTime?
+  cancelledAt         DateTime?
+
+  nation   Nation          @relation(fields: [nationId], references: [id], onDelete: Cascade)
+  location MapLocation     @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  engineer CharacterAgent? @relation("UpgradeEngineer", fields: [engineerAgentId], references: [id], onDelete: SetNull)
+
+  @@index([nationId, status])
+  @@index([locationId, status])
+  @@index([engineerAgentId, status])
+}
+
+enum EconomyLedgerKind {
+  TREASURY
+  RESOURCE
+  POPULATION
+  CAPACITY
+}
+
+enum LocationUpgradeStatus {
+  QUEUED
+  COMPLETED
+  CANCELLED
+}
+
+enum TerrainType {
+  OCEAN
+  COAST
+  PLAINS
+  FOREST
+  HILLS
+  MOUNTAIN
+  DESERT
+  WETLAND
+  TUNDRA
+}
+
+enum TerritorialControlLevel {
+  CLAIMED
+  SECURED
+}
+
+enum TerritoryClaimStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+  BLOCKED
+}
+
+enum OutpostStatus {
+  BUILDING
+  ACTIVE
+  INACTIVE
+  CONVERTED
+  CANCELLED
+}
+
+enum ExpansionProjectStatus {
+  QUEUED
+  COMPLETED
+  CANCELLED
+}
+
+enum CivilianUnitType {
+  COLONIST
+}
+
+enum CivilianUnitStatus {
+  READY
+  TRAVELING
+  FOUNDING
+  RESETTLED
+  CONSUMED
+}
+
+enum FoundingCharter {
+  AGRARIAN
+  COMMERCIAL
+  INDUSTRIAL
+  DEFENSIVE
+  CIVIC
+}
+
+enum InfrastructureType {
+  ROAD
+  RAIL
+  SEA_LANE
+}
+
+enum InfrastructureProjectStatus {
+  QUEUED
+  COMPLETED
+  CANCELLED
+}
+
+enum InfrastructureLinkScope {
+  MAJOR
+  REGIONAL_LEGACY
+}
+
+enum SettlementType {
+  CAPITAL
+  SECONDARY
+}
+
+enum SettlementLevel {
+  TOWN
+  CITY
+  MAJOR_CITY
+  METROPOLIS
+}
+
+enum SettlementSpecialization {
+  AGRICULTURAL
+  INDUSTRIAL
+  COMMERCIAL
+  RESEARCH
+  MILITARY
+  ADMINISTRATIVE
+  CULTURAL
+  PORT_CITY
+  MINING
+  ENERGY
+}
+
+enum GovernorPriority {
+  GROWTH
+  PRODUCTION
+  FOOD_SECURITY
+  COMMERCE
+  RESEARCH
+  MILITARY
+  STABILITY
+  BALANCED
+}
+
+enum TransportationLevel {
+  ISOLATED
+  TRAILS
+  ROADS
+  IMPROVED_ROADS
+  RAIL
+  ADVANCED_NETWORK
+}
+
+enum SettlementProjectType {
+  BUILDING
+  SETTLEMENT_UPGRADE
+  REGIONAL_IMPROVEMENT
+  SPECIALIZATION_CHANGE
+  NETWORK_RESTORATION
+  COLONIST_TRAINING
+}
+
+enum SettlementSpecializationSlot {
+  PRIMARY
+  SECONDARY
+}
+
+enum SettlementProjectStatus {
+  QUEUED
+  COMPLETED
+  CANCELLED
+}
+
+enum SettlementJobCategory {
+  FOOD
+  RESOURCE_SITE
+  INDUSTRY
+  COMMERCE
+  RESEARCH
+  ADMINISTRATION
+  MILITARY
+  SPECIALIST
+}
+
+enum TechnologyUnlockSource {
+  FOUNDATIONAL
+  RESEARCHED
 }
 
 enum GovernmentType {
@@ -276,6 +1192,36 @@ enum PostVisibility {
   DRAFT
 }
 
+enum PostContentFormat {
+  MARKDOWN
+  PLAIN_TEXT
+}
+
+enum PostSourceType {
+  PLAYER
+  EVENT
+}
+
+enum ConversationKind {
+  DIRECT
+  DIPLOMATIC
+}
+
+enum DiplomaticOfferType {
+  GENERAL_PROPOSAL
+  TRADE_PROPOSAL
+  NON_AGGRESSION_PROPOSAL
+  ALLIANCE_PROPOSAL
+  AID_REQUEST
+}
+
+enum DiplomaticOfferStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
 enum EventCategory {
   ECONOMY
   POLITICS
@@ -304,6 +1250,9 @@ enum MapLocationType {
   CAPITAL
   CITY
   TOWN
+  OUTPOST
+  FORT
+  PORT_SITE
   PORT
   MILITARY_BASE
   MINE
@@ -339,6 +1288,35 @@ enum AgentAssignment {
   GUARDING
   SPEAKING
   IMPROVING
+}
+
+enum AgentActionType {
+  CAMP
+  FORAGE
+  HUNT
+  SURVEY
+  GOVERN
+  SPEECH
+  DEFEND
+  SPY
+  COUNTERESPIONAGE
+  DIPLOMATIC
+  INDUSTRIAL
+}
+
+enum AgentActionStatus {
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AgentTargetType {
+  TILE
+  LOCATION
+  SETTLEMENT
+  AGENT
+  UNIT
+  NATION
 }
 
 enum MilitaryUnitType {

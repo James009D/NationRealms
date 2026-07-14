@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EventChoice, NationStatKey } from "./index";
+import { getNextTechnologyAge, getTechnologyAge, type EventChoice, type NationStatKey } from "./index";
 
 const statKeys: NationStatKey[] = [
   "economy",
@@ -25,5 +25,13 @@ describe("shared domain types", () => {
     };
 
     expect(Object.keys(choice.effects ?? {}).every((key) => statKeys.includes(key as NationStatKey))).toBe(true);
+  });
+
+  it("maps technology scores to stable age boundaries", () => {
+    expect(getTechnologyAge(-5).id).toBe("STONE");
+    expect(getTechnologyAge(56).id).toBe("RENAISSANCE");
+    expect(getTechnologyAge(100).id).toBe("FUTURE");
+    expect(getNextTechnologyAge("RENAISSANCE")?.id).toBe("INDUSTRIAL");
+    expect(getNextTechnologyAge("FUTURE")).toBeNull();
   });
 });

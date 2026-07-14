@@ -1,85 +1,72 @@
 # Validation Guide
 
-Exact commands to verify the repo from a fresh clone, with expected results.
-Last verified: June 2026 (Node v26, npm 11, Prisma 5.22).
+Last verified: July 11, 2026 with Node 24, npm 11, Fastify 5, Prisma 6, Vite 8, and Vitest 4.
 
-## 1. Baseline (no database required)
+## Repository Gates
 
 ```bash
 npm ci
-npm run prisma:generate   # generates the Prisma client; required before typecheck/test/build
-npm run typecheck         # expected: all three workspaces pass
-npm test                  # expected: all test files pass (shared, api, web)
-npm run build             # expected: shared (tsc) -> api (tsc) -> web (tsc + vite) all succeed
+npm run prisma:generate
+npx prisma validate
+npm run typecheck
+npm run lint
+npm run format:check
+npm test
+npm run test:coverage
+npm run build
+npm audit --audit-level=high
 ```
 
-Notes:
+The default API suite sets `STATECRAFT_FORCE_DB_FALLBACK=1` as a compatibility alias for `DATA_MODE=memory`. It never requires PostgreSQL. Browser binaries are installed separately with `npx playwright install chromium` before `npm run test:e2e`.
 
-- `npm run prisma:generate` needs network access the first time (engine download).
-  Everything else works offline.
-- The test suite never touches PostgreSQL. API tests cover pure game logic and the
-  in-memory fallback layer (`apps/api/src/services/fallbackDemo.test.ts`).
+## Explicit Memory Mode
 
-## 2. Fallback mode (no database)
+Memory mode must be selected; database failures never trigger it automatically.
 
-The API serves a fully playable loop from in-memory state when PostgreSQL is
-unreachable. With no database running:
-
-```bash
-npm run dev:api    # Fastify on :4000
-npm run dev:web    # Vite on :5173 (proxies /api to :4000)
+```powershell
+$env:DATA_MODE="memory"
+$env:AUTH_MODE="demo"
+npm.cmd run dev:api
 ```
 
-Expected core loop, all working against `http://localhost:4000`:
+Run `npm run dev:web` in another terminal. `/health/ready` reports `persistence: memory` and `ephemeral: true`. All writes disappear when the API exits. Memory mode is rejected when `NODE_ENV=production`.
 
-1. `POST /api/nations/create` (full creation draft) → 201 with nation, stats, starter locations/agents/units
-2. `GET /api/nations/:id/profile` → profile with stats, agents, military, posts
-3. `GET /api/nations/:id/map-locations|agents|military-units` → starter assets owned by the new nation
-4. `POST /api/agents/:agentId/assign` with one of the nation's own location IDs → 200; a foreign location ID → 404
-5. `POST /api/military-units/:unitId/move` with one of the nation's own location IDs → 200; foreign → 404
-6. `POST /api/nations/:id/events/generate` → 200 with an `activeEvent`
-7. `POST /api/events/:activeEventId/choose` → 200 with `RESOLVED` event, updated stats, history entry
-8. `GET /api/nations/:id/event-history` → includes the resolution
-9. Choices with follow-up events can create another active event; choices with `createNationPost` publish a post visible from `GET /api/nations/:id/posts`
-10. `POST /api/nations/:id/advance-turn` → `currentTurn` increments and a new event may generate
-11. `GET /api/demo-state` → reflects the demo nation's current turn and contains only demo-nation entities
-12. Legacy `POST /api/nations` → 201 with a bare nation + default stats (works in both modes)
-
-Fallback state lives in API process memory: it resets on restart and is per-process.
-
-## 3. Database mode (PostgreSQL + Prisma)
+## PostgreSQL Mode
 
 ```bash
-cp .env.example .env            # DATABASE_URL points at the compose Postgres
 docker compose up -d postgres
-npm run db:push                 # push schema (prototyping; use prisma:migrate for real migrations)
-npm run prisma:seed             # seeds demo user, Aurelian Commonwealth, locations, agents, units
+npm run prisma:generate
+npx prisma migrate deploy
+npm run prisma:seed
 npm run dev:api
+npm run dev:web
 ```
 
-Expected: `GET /api/demo-state` returns the seeded nation with a cuid id (not
-`demo-nation`), and the same 11-step loop above passes. Event templates are
-upserted into the database lazily on first generation.
+`npm run prisma:seed` is idempotent and does not erase player data. The separately named `npm run prisma:reset-demo` requires `CONFIRM_DEMO_RESET=YES` and removes demo-owned data only.
 
-## 4. Realtime events
+To run PostgreSQL integration tests, point `DATABASE_URL` at an isolated test database and run:
 
-Socket.IO emits to all connected clients (no rooms/auth yet):
+```bash
+RUN_DB_TESTS=1 DATA_MODE=postgres AUTH_MODE=session npm test --workspace @statecraft/api
+```
 
-- `nation:post-created`
-- `event:generated` (new active event, from generation or turn advancement)
-- `event:choice-resolved` (a choice was resolved)
-- `agent:assigned`
-- `military:unit-moved`
+## Expected Playable Loop
 
-The Events page consumes `event:generated` and `event:choice-resolved`; the News page consumes `nation:post-created` and event-created posts from `event:choice-resolved`.
+1. Register/sign in when `AUTH_MODE=session`, or use the development principal in `AUTH_MODE=demo`.
+2. Create a nation and verify starter stats, economy, resources, locations, agents, units, and founding post.
+3. Open Development, fund an affordable location upgrade, and verify treasury/materials are deducted immediately.
+4. Advance enough turns to complete the project and verify the new level affects that completion turn's production.
+5. Start and cancel another project; verify the ledger and balances show a 75% refund.
+6. Advance a turn and inspect treasury, population, resource production/consumption, shortages, agent XP, unit readiness, completed projects, agent contributions, expired issues, and the generated issue.
+7. Resolve an issue once; a repeated resolution returns `409` and cannot apply effects twice.
+8. Publish or curate a Markdown post. Public feed traffic uses the public Socket.IO room; owner traffic stays in the nation room.
+9. Open Expansion, move an agent to a neutral frontier tile, Survey it, preview a claim, and verify ownership changes only when turns advance.
+10. Complete a claim, establish a supplied outpost, and verify outpost maturity requires four consecutive supplied turns.
+11. Train a colonist and verify one population level is reserved immediately; cancellation or resettlement restores it, while founding transfers it into the new Town.
+12. Preview agent travel and use a local field action. Verify AP, current position, target cooldowns, and duty-location bonuses match the owner operations view.
 
-## 5. Known limitations
+## Local Validation Notes
 
-- Cross-nation assignment/movement rejections intentionally return **404** in both DB and fallback modes because no auth/ownership layer exists yet.
-- Fallback weighted event selection uses `Math.random`; generated templates vary
-  run to run. Tests assert template-agnostic invariants.
-- `POST /api/nations` (legacy) creates a bare nation with flat default stats and
-  no starting package. Prefer `POST /api/nations/create`.
-- Empty JSON bodies on POST are accepted (treated as "no body") because browser
-  clients send `Content-Type: application/json` on body-less POSTs.
-- No auth: every nation is owned by the demo user.
+- Prisma client generation may require network access for its platform engine on a fresh machine.
+- PostgreSQL migration and integration checks fail normally when the configured server is unavailable; the API will not hide this by switching data stores.
+- Full operational rehearsal is documented in `docs/OPERATIONS.md`.

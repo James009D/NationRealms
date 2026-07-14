@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { requirePrincipal } from "../auth/principal.js";
 import {
   CULTURE_TRAITS,
   ECONOMY_TYPE_OPTIONS,
@@ -16,6 +17,7 @@ import {
   createNationFromInput,
   validateNationCreationInput
 } from "../services/nationCreationService.js";
+import { emitRealtime } from "../realtime.js";
 
 export async function registerNationCreationRoutes(app: FastifyInstance) {
   app.get("/api/nation-creation/options", async () => ({
@@ -34,10 +36,11 @@ export async function registerNationCreationRoutes(app: FastifyInstance) {
 
   app.post("/api/nations/create", async (request, reply) => {
     const draft = (request.body ?? {}) as NationCreationDraft;
+    const principal = requirePrincipal(request);
 
     try {
-      const user = await getOrCreateDemoUser();
-      const result = await createNationFromInput(draft, user.id);
+      const userId = principal.kind === "demo-user" ? (await getOrCreateDemoUser()).id : principal.userId;
+      const result = await createNationFromInput(draft, userId);
 
       if (!result.ok) {
         return reply.code(400).send({
@@ -46,6 +49,7 @@ export async function registerNationCreationRoutes(app: FastifyInstance) {
         });
       }
 
+      emitRealtime("world:territory-claimed", { nationId: result.result.nation.id });
       return reply.code(201).send(result.result);
     } catch (error) {
       if (isDatabaseUnavailable(error)) {
@@ -58,7 +62,9 @@ export async function registerNationCreationRoutes(app: FastifyInstance) {
           });
         }
 
-        return reply.code(201).send(createFallbackNationFromInput(validation.input));
+        const created = createFallbackNationFromInput(validation.input, principal.userId);
+        emitRealtime("world:territory-claimed", { nationId: created.nation.id });
+        return reply.code(201).send(created);
       }
 
       throw error;

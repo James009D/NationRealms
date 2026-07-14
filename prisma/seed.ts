@@ -6,33 +6,134 @@ import {
   GovernmentType,
   MapLocationType,
   MilitaryUnitType,
+  PostContentFormat,
+  PostSourceType,
   NationPostType,
   PostVisibility,
   PrismaClient,
   ResourceType
 } from "@prisma/client";
 import { EVENT_TEMPLATES } from "../apps/api/src/data/eventTemplates.js";
+import { ensureNationSettlements } from "../apps/api/src/services/settlementService.js";
+import { ensureNationTechnology } from "../apps/api/src/services/technologyService.js";
+import { initializeExistingNations } from "../apps/api/src/services/worldService.js";
 
 const prisma = new PrismaClient();
 
-async function main() {
-  await prisma.militaryUnit.deleteMany();
-  await prisma.characterAgent.deleteMany();
-  await prisma.mapLocation.deleteMany();
-  await prisma.resolvedEvent.deleteMany();
-  await prisma.activeEvent.deleteMany();
-  await prisma.eventTemplate.deleteMany();
-  await prisma.nationPost.deleteMany();
-  await prisma.nationStats.deleteMany();
-  await prisma.nation.deleteMany();
-  await prisma.user.deleteMany();
+async function upsertEventTemplates() {
+  return Promise.all(
+    EVENT_TEMPLATES.map((template) =>
+      prisma.eventTemplate.upsert({
+        where: { key: template.key },
+        create: {
+          key: template.key,
+          title: template.title,
+          description: template.description,
+          category: template.category as EventCategory,
+          tagsJson: template.tags,
+          eligibilityJson: template.eligibility,
+          choicesJson: template.choices,
+          effectsJson: {},
+          weight: template.weight,
+          cooldownTurns: template.cooldownTurns ?? null,
+          followUpEventKeysJson: template.followUpEventKeys ?? []
+        },
+        update: {
+          title: template.title,
+          description: template.description,
+          category: template.category as EventCategory,
+          tagsJson: template.tags,
+          eligibilityJson: template.eligibility,
+          choicesJson: template.choices,
+          weight: template.weight,
+          cooldownTurns: template.cooldownTurns ?? null,
+          followUpEventKeysJson: template.followUpEventKeys ?? []
+        }
+      })
+    )
+  );
+}
 
-  const user = await prisma.user.create({
-    data: {
+async function ensureSeedEconomy(nationId: string) {
+  await prisma.nationEconomy.upsert({
+    where: { nationId },
+    create: { nationId, treasury: 1200, population: 1_100_000 },
+    update: {}
+  });
+  await prisma.resourceStockpile.createMany({
+    data: Object.values(ResourceType).map((type) => ({
+      nationId,
+      type,
+      amount: type === ResourceType.FOOD ? 600 : type === ResourceType.ENERGY ? 350 : 180,
+      capacity: 2000
+    })),
+    skipDuplicates: true
+  });
+}
+
+async function backfillPostTags(nationId: string) {
+  const seededPosts = await prisma.nationPost.findMany({ where: { nationId }, select: { id: true, tagsJson: true } });
+  await prisma.nationPostTag.createMany({
+    data: seededPosts.flatMap((post) =>
+      (Array.isArray(post.tagsJson) ? post.tagsJson : [])
+        .filter((tag): tag is string => typeof tag === "string")
+        .map((value) => ({ postId: post.id, value: value.toLowerCase() }))
+    ),
+    skipDuplicates: true
+  });
+}
+
+async function ensureDemoEngineer(nationId: string) {
+  const mine = await prisma.mapLocation.findFirst({ where: { nationId, type: MapLocationType.MINE } });
+  if (!mine) return null;
+  const data = {
+    role: AgentRole.ENGINEER,
+    level: 2,
+    xp: 140,
+    loyalty: 79,
+    health: 95,
+    traitsJson: [
+      {
+        name: "Methodical Builder",
+        description: "Plans public works around dependable crews and recoverable materials.",
+        modifier: "-construction cost and duration"
+      }
+    ],
+    skillsJson: [
+      { name: "Civil Engineering", level: 2, xp: 125 },
+      { name: "Project Management", level: 2, xp: 105 }
+    ],
+    assignment: AgentAssignment.IMPROVING,
+    assignedLocationId: mine.id
+  };
+  const existing = await prisma.characterAgent.findFirst({ where: { nationId, name: "Engineer Ilyan Rook" } });
+  return existing
+    ? prisma.characterAgent.update({ where: { id: existing.id }, data })
+    : prisma.characterAgent.create({ data: { nationId, name: "Engineer Ilyan Rook", ...data } });
+}
+
+async function main() {
+  const user = await prisma.user.upsert({
+    where: { email: "demo@statecraft.online" },
+    create: {
       email: "demo@statecraft.online",
       displayName: "Demo Strategist"
-    }
+    },
+    update: { displayName: "Demo Strategist" }
   });
+
+  const existingNation = await prisma.nation.findFirst({ where: { userId: user.id, name: "Aurelian Commonwealth" } });
+  if (existingNation) {
+    await upsertEventTemplates();
+    await ensureSeedEconomy(existingNation.id);
+    await ensureNationTechnology(prisma, existingNation.id, 50);
+    await backfillPostTags(existingNation.id);
+    await ensureDemoEngineer(existingNation.id);
+    await initializeExistingNations();
+    await ensureNationSettlements(existingNation.id, prisma);
+    console.log(`Demo nation already seeded: ${existingNation.name}`);
+    return;
+  }
 
   const nation = await prisma.nation.create({
     data: {
@@ -80,6 +181,8 @@ async function main() {
       publicTrust: 64
     }
   });
+  await ensureSeedEconomy(nation.id);
+  await ensureNationTechnology(prisma, nation.id, 50);
 
   await prisma.nationPost.createMany({
     data: [
@@ -87,68 +190,92 @@ async function main() {
         nationId: nation.id,
         type: NationPostType.GOVERNMENT_UPDATE,
         title: "Cabinet Opens Coastal Resilience Review",
-        body:
-          "The Commonwealth Council announced a review of port defenses, harbor jobs, and flood planning after a season of rough storms.",
-        visibility: PostVisibility.PUBLIC
+        body: "The Commonwealth Council announced a **coastal resilience review** covering port defenses, harbor jobs, and flood planning after a season of rough storms.",
+        format: PostContentFormat.MARKDOWN,
+        sourceType: PostSourceType.PLAYER,
+        visibility: PostVisibility.PUBLIC,
+        tagsJson: ["infrastructure", "port"],
+        excerpt:
+          "The Commonwealth Council announced a coastal resilience review covering port defenses, harbor jobs, and flood planning.",
+        publishedAt: new Date()
       },
       {
         nationId: nation.id,
         type: NationPostType.SPEECH,
         title: "Chancellor Vale Addresses the Assembly",
-        body:
-          "Chancellor Mara Vale called for patient reform, disciplined defense spending, and a renewed commitment to public works.",
-        visibility: PostVisibility.PUBLIC
+        body: "Chancellor Mara Vale called for patient reform, disciplined defense spending, and a renewed commitment to public works.\n\n> Many voices, one horizon.",
+        format: PostContentFormat.MARKDOWN,
+        sourceType: PostSourceType.PLAYER,
+        visibility: PostVisibility.PUBLIC,
+        tagsJson: ["speech", "culture"],
+        excerpt: "Chancellor Mara Vale called for reform, disciplined defense spending, and renewed public works.",
+        publishedAt: new Date()
       },
       {
         nationId: nation.id,
         type: NationPostType.NEWS,
         title: "Iron Output Rises Near Greyspan Mine",
-        body:
-          "Mine officials report a modest increase in output after new safety equipment and rail scheduling improvements came online.",
-        visibility: PostVisibility.PUBLIC
+        body: "Mine officials report a modest increase in output after new safety equipment and rail scheduling improvements came online.",
+        format: PostContentFormat.MARKDOWN,
+        sourceType: PostSourceType.PLAYER,
+        visibility: PostVisibility.PUBLIC,
+        tagsJson: ["economy", "mine"],
+        excerpt: "Mine officials report a modest increase in output after safety and rail improvements.",
+        publishedAt: new Date()
+      },
+      {
+        nationId: nation.id,
+        type: NationPostType.NEWS,
+        title: "Draft: Harbor Interviews",
+        body: "A draft collection of interviews with dock crews and merchants.",
+        format: PostContentFormat.MARKDOWN,
+        sourceType: PostSourceType.PLAYER,
+        visibility: PostVisibility.DRAFT,
+        tagsJson: ["draft", "port"],
+        excerpt: "A draft collection of interviews with dock crews and merchants."
       }
     ]
   });
 
-  const eventTemplates = await Promise.all(
-    EVENT_TEMPLATES.map((template) =>
-      prisma.eventTemplate.create({
-        data: {
-          key: template.key,
-          title: template.title,
-          description: template.description,
-          category: template.category as EventCategory,
-          tagsJson: template.tags,
-          eligibilityJson: template.eligibility,
-          choicesJson: template.choices,
-          effectsJson: {},
-          weight: template.weight,
-          cooldownTurns: template.cooldownTurns ?? null,
-          followUpEventKeysJson: template.followUpEventKeys ?? []
-        }
-      })
-    )
-  );
+  const eventTemplates = await upsertEventTemplates();
 
   await prisma.activeEvent.create({
     data: {
       nationId: nation.id,
-      eventTemplateId: eventTemplates.find((template) => template.key === "port_workers_strike")?.id ?? eventTemplates[0].id,
+      eventTemplateId:
+        eventTemplates.find((template) => template.key === "port_workers_strike")?.id ?? eventTemplates[0].id,
       generatedTurn: 3,
       expiresTurn: 6
     }
   });
 
-  await prisma.resolvedEvent.create({
+  const resolvedEvent = await prisma.resolvedEvent.create({
     data: {
       nationId: nation.id,
-      eventTemplateId: eventTemplates.find((template) => template.key === "national_day_speech")?.id ?? eventTemplates[0].id,
+      eventTemplateId:
+        eventTemplates.find((template) => template.key === "national_day_speech")?.id ?? eventTemplates[0].id,
       title: "National Day Speech",
       selectedChoiceId: "unity",
       selectedChoiceLabel: "Call for unity",
       resultSummary: "The speech landed well and gave the government breathing room.",
       effectsJson: { statChanges: { stability: 3, publicTrust: 3 } },
       turn: 2
+    }
+  });
+
+  await prisma.nationPost.create({
+    data: {
+      nationId: nation.id,
+      type: NationPostType.SPEECH,
+      title: "National Day Address Calls for Unity",
+      body: "The head of state used the National Day address to call for patience, service, and unity.",
+      format: PostContentFormat.MARKDOWN,
+      sourceType: PostSourceType.EVENT,
+      sourceEventHistoryId: resolvedEvent.id,
+      visibility: PostVisibility.PUBLIC,
+      tagsJson: ["event", "speech", "public_trust"],
+      excerpt: "The National Day address called for patience, service, and unity.",
+      publishedAt: new Date()
     }
   });
 
@@ -301,6 +428,8 @@ async function main() {
     }
   });
 
+  const engineer = await ensureDemoEngineer(nation.id);
+
   await prisma.militaryUnit.createMany({
     data: [
       {
@@ -336,10 +465,19 @@ async function main() {
     ]
   });
 
+  await backfillPostTags(nation.id);
+  await initializeExistingNations();
+  await ensureNationSettlements(nation.id, prisma);
+
   console.log(`Seeded demo nation: ${nation.name}`);
   console.log(`Demo user: ${user.email}`);
   console.log(`Map locations: ${[capital, port, base, mine, farm, town].map((location) => location.name).join(", ")}`);
-  console.log(`Agents: ${[headOfState, general, governor].map((agent) => agent.name).join(", ")}`);
+  console.log(
+    `Agents: ${[headOfState, general, governor, engineer]
+      .filter(Boolean)
+      .map((agent) => agent!.name)
+      .join(", ")}`
+  );
 }
 
 main()

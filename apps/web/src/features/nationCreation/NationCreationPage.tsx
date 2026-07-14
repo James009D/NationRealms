@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   CULTURE_TRAITS,
@@ -14,22 +14,18 @@ import {
   type GovernmentType,
   type IdeologyAxisKey,
   type NationCreationDraft,
-  type NationCreationPreview
+  type NationCreationPreview,
+  type HomelandPreview,
+  type WorldTile,
+  type WorldViewport
 } from "@statecraft/shared";
-import { createNationFromDraft, previewNationCreation } from "../../api";
+import { createNationFromDraft, getWorldViewport, previewHomeland, previewNationCreation } from "../../api";
 import { formatEnum } from "../../format";
 import { FlagPreview } from "./components/FlagPreview";
 import { StatPreview } from "./components/StatPreview";
+import { MapGrid } from "../../components/MapGrid";
 
-const steps = [
-  "Identity",
-  "Government",
-  "Ideology",
-  "Culture",
-  "Flag",
-  "Package",
-  "Review"
-];
+const steps = ["Identity", "Government", "Ideology", "Culture", "Flag", "Package", "World", "Review"];
 
 const defaultDraft: NationCreationDraft = {
   name: "",
@@ -184,7 +180,8 @@ export function NationCreationPage() {
           {stepIndex === 3 ? <CultureStep draft={draft} toggleTrait={toggleTrait} /> : null}
           {stepIndex === 4 ? <FlagStep draft={draft} patch={patch} /> : null}
           {stepIndex === 5 ? <PackageStep draft={draft} patch={patch} /> : null}
-          {stepIndex === 6 ? <ReviewStep draft={draft} preview={preview} /> : null}
+          {stepIndex === 6 ? <HomelandStep draft={draft} patch={patch} /> : null}
+          {stepIndex === 7 ? <ReviewStep draft={draft} preview={preview} /> : null}
 
           {error ? <p className="form-error">{error}</p> : null}
           {preview && preview.validationMessages.length > 0 ? (
@@ -204,7 +201,11 @@ export function NationCreationPage() {
                 Next
               </button>
             ) : (
-              <button className="primary-action" type="submit" disabled={isSubmitting || !preview?.isValid}>
+              <button
+                className="primary-action"
+                type="submit"
+                disabled={isSubmitting || !preview?.isValid || !draft.homeland}
+              >
                 {isSubmitting ? "Founding" : "Found Nation"}
               </button>
             )}
@@ -233,11 +234,21 @@ function IdentityStep({ draft, patch }: StepProps) {
       <div className="form-grid form-grid--two">
         <label>
           Nation Name
-          <input value={draft.name ?? ""} onChange={(event) => patch({ name: event.target.value })} required minLength={3} maxLength={60} />
+          <input
+            value={draft.name ?? ""}
+            onChange={(event) => patch({ name: event.target.value })}
+            required
+            minLength={3}
+            maxLength={60}
+          />
         </label>
         <label>
           Short Name or Demonym
-          <input value={draft.demonym ?? ""} onChange={(event) => patch({ demonym: event.target.value, shortName: event.target.value })} maxLength={60} />
+          <input
+            value={draft.demonym ?? ""}
+            onChange={(event) => patch({ demonym: event.target.value, shortName: event.target.value })}
+            maxLength={60}
+          />
         </label>
         <label>
           Motto
@@ -245,16 +256,32 @@ function IdentityStep({ draft, patch }: StepProps) {
         </label>
         <label>
           Capital City
-          <input value={draft.capitalName ?? ""} onChange={(event) => patch({ capitalName: event.target.value })} required minLength={2} maxLength={60} />
+          <input
+            value={draft.capitalName ?? ""}
+            onChange={(event) => patch({ capitalName: event.target.value })}
+            required
+            minLength={2}
+            maxLength={60}
+          />
         </label>
       </div>
       <label>
         Culture Summary
-        <textarea value={draft.cultureSummary ?? ""} onChange={(event) => patch({ cultureSummary: event.target.value })} maxLength={500} rows={4} />
+        <textarea
+          value={draft.cultureSummary ?? ""}
+          onChange={(event) => patch({ cultureSummary: event.target.value })}
+          maxLength={500}
+          rows={4}
+        />
       </label>
       <label>
         Public Description
-        <textarea value={draft.description ?? ""} onChange={(event) => patch({ description: event.target.value })} maxLength={1200} rows={5} />
+        <textarea
+          value={draft.description ?? ""}
+          onChange={(event) => patch({ description: event.target.value })}
+          maxLength={1200}
+          rows={5}
+        />
       </label>
     </div>
   );
@@ -289,7 +316,13 @@ function GovernmentStep({ draft, patch }: StepProps) {
   );
 }
 
-function IdeologyStep({ draft, setIdeology }: { draft: NationCreationDraft; setIdeology: (key: IdeologyAxisKey, value: number) => void }) {
+function IdeologyStep({
+  draft,
+  setIdeology
+}: {
+  draft: NationCreationDraft;
+  setIdeology: (key: IdeologyAxisKey, value: number) => void;
+}) {
   return (
     <div className="wizard-step-content">
       <p className="panel-kicker">Step 3</p>
@@ -320,7 +353,13 @@ function IdeologyStep({ draft, setIdeology }: { draft: NationCreationDraft; setI
   );
 }
 
-function CultureStep({ draft, toggleTrait }: { draft: NationCreationDraft; toggleTrait: (trait: CultureTraitDefinition) => void }) {
+function CultureStep({
+  draft,
+  toggleTrait
+}: {
+  draft: NationCreationDraft;
+  toggleTrait: (trait: CultureTraitDefinition) => void;
+}) {
   const selected = draft.cultureTraitIds ?? [];
 
   return (
@@ -338,7 +377,11 @@ function CultureStep({ draft, toggleTrait }: { draft: NationCreationDraft; toggl
           >
             <strong>{trait.label}</strong>
             <span>{trait.description}</span>
-            <small>{Object.entries(trait.modifiers).map(([key, value]) => `${formatEnum(key)} ${value! > 0 ? "+" : ""}${value}`).join(", ")}</small>
+            <small>
+              {Object.entries(trait.modifiers)
+                .map(([key, value]) => `${formatEnum(key)} ${value! > 0 ? "+" : ""}${value}`)
+                .join(", ")}
+            </small>
           </button>
         ))}
       </div>
@@ -363,12 +406,19 @@ function FlagStep({ draft, patch }: StepProps) {
         {(["primaryColor", "secondaryColor", "accentColor"] as const).map((key) => (
           <label key={key}>
             {formatEnum(key)}
-            <input type="color" value={draft.flag?.[key] ?? defaultDraft.flag![key]} onChange={(event) => patch({ flag: { [key]: event.target.value } })} />
+            <input
+              type="color"
+              value={draft.flag?.[key] ?? defaultDraft.flag![key]}
+              onChange={(event) => patch({ flag: { [key]: event.target.value } })}
+            />
           </label>
         ))}
         <label>
           Emblem
-          <select value={draft.flag?.emblemSymbol ?? "Star"} onChange={(event) => patch({ flag: { emblemSymbol: event.target.value } })}>
+          <select
+            value={draft.flag?.emblemSymbol ?? "Star"}
+            onChange={(event) => patch({ flag: { emblemSymbol: event.target.value } })}
+          >
             {EMBLEM_OPTIONS.map((emblem) => (
               <option key={emblem} value={emblem}>
                 {emblem}
@@ -392,14 +442,124 @@ function PackageStep({ draft, patch }: StepProps) {
             className={draft.startingPackageId === pack.id ? "package-card package-card--selected" : "package-card"}
             key={pack.id}
             type="button"
-            onClick={() => patch({ startingPackageId: pack.id })}
+            onClick={() => patch({ startingPackageId: pack.id, homeland: null })}
           >
             <strong>{pack.label}</strong>
             <span>{pack.description}</span>
-            <small>{pack.locations.length} locations / {pack.agents.length} agents / {pack.militaryUnits.length} units</small>
+            <small>
+              {pack.locations.length} locations / {pack.agents.length} agents / {pack.militaryUnits.length} units
+            </small>
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function HomelandStep({ draft, patch }: StepProps) {
+  const [viewport, setViewport] = useState<WorldViewport | null>(null);
+  const [center, setCenter] = useState({ x: 47, y: 31 });
+  const [preview, setPreview] = useState<HomelandPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const loadViewport = useCallback(async () => {
+    setViewport(
+      await getWorldViewport({
+        minX: Math.max(0, center.x - 12),
+        minY: Math.max(0, center.y - 8),
+        maxX: center.x + 12,
+        maxY: center.y + 8
+      })
+    );
+  }, [center.x, center.y]);
+  useEffect(() => {
+    loadViewport().catch((error: Error) => setMessage(error.message));
+  }, [loadViewport]);
+
+  async function selectTile(tile: WorldTile) {
+    setLoading(true);
+    setMessage(null);
+    try {
+      const result = await previewHomeland({
+        capitalX: tile.x,
+        capitalY: tile.y,
+        startingPackageId: draft.startingPackageId ?? "balanced_republic"
+      });
+      setPreview(result);
+      if (result.valid)
+        patch({
+          homeland: {
+            worldMapId: tile.worldMapId,
+            capitalX: tile.x,
+            capitalY: tile.y,
+            previewVersion: result.previewVersion
+          }
+        });
+      else {
+        patch({ homeland: null });
+        setMessage(result.warnings.join(" "));
+      }
+    } catch (error) {
+      patch({ homeland: null });
+      setMessage(error instanceof Error ? error.message : "Could not preview this homeland");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="wizard-step-content homeland-step">
+      <p className="panel-kicker">Step 7</p>
+      <h2>Choose a Homeland</h2>
+      <p>
+        Select an unclaimed land tile for the capital. The server will form a compact territory and place starting
+        assets on viable terrain.
+      </p>
+      <div className="homeland-map-controls">
+        <button type="button" onClick={() => setCenter((value) => ({ ...value, y: Math.max(8, value.y - 10) }))}>
+          North
+        </button>
+        <button type="button" onClick={() => setCenter((value) => ({ ...value, x: Math.max(12, value.x - 14) }))}>
+          West
+        </button>
+        <button type="button" onClick={() => setCenter((value) => ({ ...value, x: Math.min(83, value.x + 14) }))}>
+          East
+        </button>
+        <button type="button" onClick={() => setCenter((value) => ({ ...value, y: Math.min(55, value.y + 10) }))}>
+          South
+        </button>
+      </div>
+      {viewport ? (
+        <MapGrid
+          locations={[]}
+          tiles={viewport.tiles}
+          selectedTileId={preview?.capital.id}
+          onSelect={() => undefined}
+          onSelectTile={selectTile}
+          layer="POLITICAL"
+        />
+      ) : (
+        <p>Surveying world terrain...</p>
+      )}
+      {loading ? <p aria-live="polite">Evaluating territory...</p> : null}
+      {message ? <p className="form-error">{message}</p> : null}
+      {preview?.valid ? (
+        <div className="homeland-summary">
+          <strong>
+            Viable homeland selected at {preview.capital.x}, {preview.capital.y}
+          </strong>
+          <span>{preview.claimedTiles.length} tiles</span>
+          <span>
+            {Object.entries(preview.terrainSummary)
+              .map(([type, count]) => `${formatEnum(type)} ${count}`)
+              .join(" / ")}
+          </span>
+          <span>
+            Locations:{" "}
+            {preview.locationPlacements.map((item) => `${item.name} (${formatEnum(item.tile.terrain)})`).join(", ")}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -431,9 +591,15 @@ function ReviewStep({ draft, preview }: { draft: NationCreationDraft; preview: N
               <dt>Package</dt>
               <dd>{preview?.startingPackage?.label}</dd>
             </div>
+            <div>
+              <dt>Homeland</dt>
+              <dd>{draft.homeland ? `${draft.homeland.capitalX}, ${draft.homeland.capitalY}` : "Not selected"}</dd>
+            </div>
           </dl>
           <div className="tag-list">
-            {preview?.cultureTraits.map((trait) => <span key={trait.id}>{trait.label}</span>)}
+            {preview?.cultureTraits.map((trait) => (
+              <span key={trait.id}>{trait.label}</span>
+            ))}
           </div>
         </div>
         <div>

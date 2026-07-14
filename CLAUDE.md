@@ -75,6 +75,7 @@ Event effects support: clamped stat changes, agent XP/loyalty adjustments (by ro
 ## Web App Routes
 
 The React app uses React Router v6 with these routes:
+
 - `/` - Landing page
 - `/create-nation` - Nation creation wizard
 - `/demo` - Demo dashboard for seeded nation
@@ -100,6 +101,7 @@ Note: `apps/api/src/app.ts` registers a tolerant JSON content-type parser — br
 ## Testing
 
 Tests use `vitest`. There are test files in:
+
 - `packages/shared/src/index.test.ts`
 - `apps/api/src/services/nationCreationService.test.ts`
 - `apps/api/src/services/eventEngineService.test.ts`

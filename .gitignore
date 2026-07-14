@@ -9,3 +9,5 @@ coverage/
 .codex-*.log
 .brainstorm/
 .playwright-mcp/
+playwright-report/
+test-results/

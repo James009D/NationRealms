@@ -16,7 +16,8 @@ export function ActiveEventCard({
   return (
     <article className="panel">
       <div className="panel-kicker">
-        {formatEnum(event.eventTemplate?.category)} / Turn {event.generatedTurn ?? "?"}
+        {formatEnum(event.eventTemplate?.category)} / Turn {event.generatedTurn ?? "?"} / Expires{" "}
+        {event.expiresTurn ?? "open"}
       </div>
       <h2>{event.eventTemplate?.title}</h2>
       <p>{event.eventTemplate?.description}</p>

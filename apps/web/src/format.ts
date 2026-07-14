@@ -10,6 +10,7 @@ export function formatEnum(value?: string | null) {
   if (value === "IMPOSSIBLE_STATE") return "Something Went Sideways";
 
   return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .toLowerCase()
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -29,6 +30,9 @@ export function locationMarker(type: LocationType) {
     CAPITAL: "*",
     CITY: "C",
     TOWN: "T",
+    OUTPOST: "O",
+    FORT: "#",
+    PORT_SITE: "P",
     PORT: "P",
     MILITARY_BASE: "B",
     MINE: "M",

@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { ActiveEventStatus } from "@prisma/client";
+import { getTechnologyAge } from "@statecraft/shared";
 import type {
   ActiveEvent,
   AgentRole,
@@ -9,6 +10,9 @@ import type {
   EventHistoryEntry,
   EventResolutionResult,
   EventTemplateDefinition,
+  EconomyType,
+  FoundingOrigin,
+  GovernmentType,
   LocationType,
   MilitaryUnitType,
   NationIdeology,
@@ -17,18 +21,16 @@ import type {
   StatModifier
 } from "@statecraft/shared";
 import { EVENT_TEMPLATES } from "../data/eventTemplates.js";
+import { validateEventTemplateLibrary } from "../data/eventTemplateValidation.js";
+import { conflict } from "../errors.js";
 import { clampStat } from "./eventEffects.js";
 import { prisma } from "../prisma.js";
-import { emitRealtime } from "../realtime.js";
-import {
-  serializeActiveEvent,
-  serializeAgent,
-  serializeEventTemplate,
-  serializeLocation,
-  serializeMilitaryUnit,
-  serializePost,
-  serializeStats
-} from "./serializers.js";
+import { serializeActiveEvent, serializeStats } from "./serializers.js";
+import { createPostForNation } from "./postService.js";
+import { applyEconomyEventEffects, getEconomySnapshot } from "./economyService.js";
+import { levelForXp } from "./progression.js";
+import { runSerializable } from "./transactions.js";
+import { technologyActivationChanges } from "./technologyService.js";
 
 type StatShape = Omit<NationStats, "id" | "nationId">;
 type Tx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
@@ -45,13 +47,13 @@ const statKeys: NationStatKey[] = [
 ];
 
 export interface NationEventContext {
-  nation: any;
+  nation: { governmentType: GovernmentType; economyType: EconomyType; foundingOrigin?: FoundingOrigin | null };
   stats: StatShape;
   ideology: Partial<NationIdeology>;
   cultureTraitIds: string[];
-  mapLocations: any[];
-  agents: any[];
-  militaryUnits: any[];
+  mapLocations: Array<{ id?: string; type: LocationType }>;
+  agents: Array<{ id?: string; role: AgentRole; assignedLocationId?: string | null }>;
+  militaryUnits: Array<{ id?: string; type: MilitaryUnitType }>;
   recentResolvedEvents: Array<{ key: string; turn: number }>;
   activeEventKeys: string[];
   currentTurn: number;
@@ -67,7 +69,12 @@ function asObject<T extends object>(value: unknown): Partial<T> {
 
 export { clampStat };
 
-export type AgentEffectTarget = { role?: AgentRole; assignedLocationType?: LocationType; amount: number };
+export type AgentEffectTarget = {
+  agentId?: string;
+  role?: AgentRole;
+  assignedLocationType?: LocationType;
+  amount: number;
+};
 
 /**
  * Shared targeting rule for agent XP/loyalty effects so the Prisma and
@@ -76,10 +83,11 @@ export type AgentEffectTarget = { role?: AgentRole; assignedLocationType?: Locat
  * that type to qualify).
  */
 export function agentMatchesEffectTarget(
-  agent: { role: AgentRole; assignedLocationId?: string | null },
+  agent: { id?: string; role: AgentRole; assignedLocationId?: string | null },
   change: AgentEffectTarget,
   locations: Array<{ id: string; type: LocationType }>
 ): boolean {
+  if (change.agentId && agent.id !== change.agentId) return false;
   if (change.role && agent.role !== change.role) return false;
 
   if (change.assignedLocationType) {
@@ -125,7 +133,11 @@ export function isTemplateEligible(template: EventTemplateDefinition, context: N
 
   if (eligibility.governmentTypes && !eligibility.governmentTypes.includes(context.nation.governmentType)) return false;
   if (eligibility.economyTypes && !eligibility.economyTypes.includes(context.nation.economyType)) return false;
-  if (eligibility.foundingOrigins && !eligibility.foundingOrigins.includes(context.nation.foundingOrigin)) return false;
+  if (
+    eligibility.foundingOrigins &&
+    (!context.nation.foundingOrigin || !eligibility.foundingOrigins.includes(context.nation.foundingOrigin))
+  )
+    return false;
 
   if (!includesAll(context.cultureTraitIds, eligibility.requiredCultureTraits)) return false;
   if (eligibility.excludedCultureTraits?.some((id) => context.cultureTraitIds.includes(id))) return false;
@@ -138,10 +150,9 @@ export function isTemplateEligible(template: EventTemplateDefinition, context: N
     if (context.stats[key] > value) return false;
   }
 
-  for (const [key, range] of Object.entries(eligibility.ideologyRanges ?? {}) as Array<[
-    keyof NationIdeology,
-    { min?: number; max?: number }
-  ]>) {
+  for (const [key, range] of Object.entries(eligibility.ideologyRanges ?? {}) as Array<
+    [keyof NationIdeology, { min?: number; max?: number }]
+  >) {
     const value = context.ideology[key];
     if (typeof value !== "number") return false;
     if (typeof range.min === "number" && value < range.min) return false;
@@ -161,7 +172,9 @@ export function isTemplateEligible(template: EventTemplateDefinition, context: N
 
   if (
     template.cooldownTurns &&
-    context.recentResolvedEvents.some((event) => event.key === template.key && context.currentTurn - event.turn < template.cooldownTurns!)
+    context.recentResolvedEvents.some(
+      (event) => event.key === template.key && context.currentTurn - event.turn < template.cooldownTurns!
+    )
   ) {
     return false;
   }
@@ -219,11 +232,27 @@ export function resolveFollowUpKeys(
   template?: { followUpEventKeys?: string[] | null }
 ): string[] {
   const choiceKeys = choice.effects.followUpEventKeys ?? [];
-  const keys = choiceKeys.length > 0 ? choiceKeys : template?.followUpEventKeys ?? [];
+  const keys = choiceKeys.length > 0 ? choiceKeys : (template?.followUpEventKeys ?? []);
   return [...new Set(keys)];
 }
 
-export function dbTemplateToDefinition(template: any): EventTemplateDefinition {
+type DatabaseEventTemplate = {
+  id: string;
+  key: string;
+  title: string;
+  description: string;
+  category: EventTemplateDefinition["category"];
+  tagsJson: unknown;
+  eligibilityJson: unknown;
+  choicesJson: unknown;
+  weight: number;
+  cooldownTurns: number | null;
+  followUpEventKeysJson: unknown;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+};
+
+export function dbTemplateToDefinition(template: DatabaseEventTemplate): EventTemplateDefinition {
   return {
     id: template.id,
     key: template.key,
@@ -277,7 +306,7 @@ export async function getNationEventContext(nationId: string, client: Tx = prism
       key: event.eventTemplate.key,
       turn: event.turn
     })),
-    activeEventKeys: nation.activeEvents.map((event: any) => event.eventTemplate.key),
+    activeEventKeys: nation.activeEvents.map((event) => event.eventTemplate.key),
     currentTurn: nation.currentTurn
   };
 }
@@ -321,56 +350,64 @@ async function ensureTemplateInDb(template: EventTemplateDefinition, client: Tx 
 }
 
 export async function seedEventTemplates(client: Tx = prisma) {
-  for (const template of EVENT_TEMPLATES) {
+  for (const template of validateEventTemplateLibrary(EVENT_TEMPLATES)) {
     await ensureTemplateInDb(template, client);
   }
 }
 
-export async function generateEventForNation(nationId: string): Promise<EventGenerationResult> {
-  return prisma.$transaction(async (tx) => {
-    const context = await getNationEventContext(nationId, tx as unknown as Tx);
-    const dbTemplates = await tx.eventTemplate.findMany();
-    const definitions = dbTemplates.length > 0 ? dbTemplates.map(dbTemplateToDefinition) : EVENT_TEMPLATES;
-    const eligible = definitions.filter((template) => isTemplateEligible(template, context));
-    const selected = selectWeightedEvent(definitions, context);
-
-    if (!selected) {
-      return {
-        activeEvent: null,
-        eligibleCount: eligible.length,
-        currentTurn: context.currentTurn,
-        message: "No eligible event templates found."
-      };
-    }
-
-    const dbTemplate = selected.id
-      ? { id: selected.id }
-      : await ensureTemplateInDb(selected, tx as unknown as Tx);
-
-    const activeEvent = await tx.activeEvent.create({
-      data: {
-        nationId,
-        eventTemplateId: dbTemplate.id,
-        generatedTurn: context.currentTurn,
-        expiresTurn: context.currentTurn + 3
-      },
-      include: { eventTemplate: true }
-    });
-
-    const serialized = serializeActiveEvent(activeEvent) as unknown as ActiveEvent;
-    emitRealtime("event:generated", { nationId, activeEvent: serialized });
-
+export async function generateEventForNationWithClient(nationId: string, client: Tx): Promise<EventGenerationResult> {
+  const context = await getNationEventContext(nationId, client);
+  if (context.activeEventKeys.length >= 3) {
     return {
-      activeEvent: serialized,
-      eligibleCount: eligible.length,
-      currentTurn: context.currentTurn
+      activeEvent: null,
+      eligibleCount: 0,
+      currentTurn: context.currentTurn,
+      message: "The cabinet already has the maximum of three active issues."
     };
+  }
+  const dbTemplates = await client.eventTemplate.findMany();
+  const definitions = dbTemplates.length > 0 ? dbTemplates.map(dbTemplateToDefinition) : EVENT_TEMPLATES;
+  const eligible = definitions.filter((template) => isTemplateEligible(template, context));
+  const selected = selectWeightedEvent(definitions, context);
+
+  if (!selected) {
+    return {
+      activeEvent: null,
+      eligibleCount: eligible.length,
+      currentTurn: context.currentTurn,
+      message: "No eligible event templates found."
+    };
+  }
+
+  const dbTemplate = selected.id ? { id: selected.id } : await ensureTemplateInDb(selected, client);
+
+  const activeEvent = await client.activeEvent.create({
+    data: {
+      nationId,
+      eventTemplateId: dbTemplate.id,
+      generatedTurn: context.currentTurn,
+      expiresTurn: context.currentTurn + 3
+    },
+    include: { eventTemplate: true }
   });
+
+  const serialized = serializeActiveEvent(activeEvent) as unknown as ActiveEvent;
+
+  return {
+    activeEvent: serialized,
+    eligibleCount: eligible.length,
+    currentTurn: context.currentTurn
+  };
+}
+
+export async function generateEventForNation(nationId: string): Promise<EventGenerationResult> {
+  return runSerializable((tx) => generateEventForNationWithClient(nationId, tx as unknown as Tx));
 }
 
 function agentEffectWhere(nationId: string, change: AgentEffectTarget) {
   return {
     nationId,
+    ...(change.agentId ? { id: change.agentId } : {}),
     ...(change.role ? { role: change.role } : {}),
     ...(change.assignedLocationType ? { assignedLocation: { type: change.assignedLocationType } } : {})
   };
@@ -378,25 +415,43 @@ function agentEffectWhere(nationId: string, change: AgentEffectTarget) {
 
 async function applyAgentEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
   for (const change of effects.agentXpChanges ?? []) {
-    const agent = await client.characterAgent.findFirst({ where: agentEffectWhere(nationId, change) });
-    if (agent) await client.characterAgent.update({ where: { id: agent.id }, data: { xp: agent.xp + change.amount } });
+    const agent = await client.characterAgent.findFirst({
+      where: agentEffectWhere(nationId, change),
+      orderBy: { id: "asc" }
+    });
+    if (agent) {
+      const xp = Math.max(0, agent.xp + change.amount);
+      await client.characterAgent.update({ where: { id: agent.id }, data: { xp, level: levelForXp(xp) } });
+    }
   }
 
   for (const change of effects.agentLoyaltyChanges ?? []) {
-    const agent = await client.characterAgent.findFirst({ where: agentEffectWhere(nationId, change) });
-    if (agent) await client.characterAgent.update({ where: { id: agent.id }, data: { loyalty: clampStat(agent.loyalty + change.amount) } });
+    const agent = await client.characterAgent.findFirst({
+      where: agentEffectWhere(nationId, change),
+      orderBy: { id: "asc" }
+    });
+    if (agent)
+      await client.characterAgent.update({
+        where: { id: agent.id },
+        data: { loyalty: clampStat(agent.loyalty + change.amount) }
+      });
   }
 }
 
 async function applyLocationEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
   for (const change of effects.locationDevelopmentChanges ?? []) {
     const location = await client.mapLocation.findFirst({
-      where: { nationId, ...(change.locationType ? { type: change.locationType } : {}) }
+      where: {
+        nationId,
+        ...(change.locationId ? { id: change.locationId } : {}),
+        ...(change.locationType ? { type: change.locationType } : {})
+      },
+      orderBy: { id: "asc" }
     });
     if (location) {
       await client.mapLocation.update({
         where: { id: location.id },
-        data: { developmentLevel: Math.max(1, location.developmentLevel + change.amount) }
+        data: { developmentLevel: Math.max(1, Math.min(5, location.developmentLevel + change.amount)) }
       });
     }
   }
@@ -405,13 +460,70 @@ async function applyLocationEffects(client: Tx, nationId: string, effects: Event
 async function applyMilitaryEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
   for (const change of effects.militaryExperienceChanges ?? []) {
     const unit = await client.militaryUnit.findFirst({
-      where: { nationId, ...(change.unitType ? { type: change.unitType } : {}) }
+      where: {
+        nationId,
+        ...(change.unitId ? { id: change.unitId } : {}),
+        ...(change.unitType ? { type: change.unitType } : {})
+      },
+      orderBy: { id: "asc" }
     });
-    if (unit) await client.militaryUnit.update({ where: { id: unit.id }, data: { experience: unit.experience + change.amount } });
+    if (unit)
+      await client.militaryUnit.update({
+        where: { id: unit.id },
+        data: { experience: unit.experience + change.amount }
+      });
   }
 }
 
-export async function applyEventEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
+async function applySettlementEffects(client: Tx, nationId: string, effects: EventChoiceEffect) {
+  for (const change of effects.settlementChanges ?? []) {
+    const settlements = await client.settlement.findMany({
+      where: { nationId, ...(change.settlementId ? { id: change.settlementId } : {}) },
+      include: { location: true },
+      orderBy:
+        change.selector === "LOWEST_STABILITY"
+          ? [{ stability: "asc" }, { id: "asc" }]
+          : change.selector === "HIGHEST_GROWTH"
+            ? [{ growthProgress: "desc" }, { id: "asc" }]
+            : [{ type: "asc" }, { id: "asc" }]
+    });
+    const settlement =
+      change.selector === "CAPITAL" ? settlements.find((item) => item.type === "CAPITAL") : settlements[0];
+    if (!settlement) continue;
+    await client.settlement.update({
+      where: { id: settlement.id },
+      data: {
+        stability: clampStat(settlement.stability + (change.stability ?? 0)),
+        health: clampStat(settlement.health + (change.health ?? 0)),
+        growthProgress: Math.max(0, settlement.growthProgress + (change.growthProgress ?? 0)),
+        storedFood: Math.max(0, settlement.storedFood + (change.storedFood ?? 0))
+      }
+    });
+  }
+  for (const change of effects.regionReliabilityChanges ?? []) {
+    const region = await client.worldRegion.findFirst({
+      where: {
+        nationId,
+        ...(change.regionId ? { id: change.regionId } : {}),
+        ...(change.settlementId ? { settlement: { id: change.settlementId } } : {})
+      },
+      orderBy: { id: "asc" }
+    });
+    if (region)
+      await client.worldRegion.update({
+        where: { id: region.id },
+        data: { networkReliability: clampStat(region.networkReliability + change.amount) }
+      });
+  }
+}
+
+export async function applyEventEffects(
+  client: Tx,
+  nationId: string,
+  effects: EventChoiceEffect,
+  turn = 1,
+  sourceId = "event"
+) {
   const stats = await client.nationStats.findUnique({ where: { nationId } });
   let updatedStats = stats;
 
@@ -425,20 +537,16 @@ export async function applyEventEffects(client: Tx, nationId: string, effects: E
   await applyAgentEffects(client, nationId, effects);
   await applyLocationEffects(client, nationId, effects);
   await applyMilitaryEffects(client, nationId, effects);
+  await applySettlementEffects(client, nationId, effects);
+  await applyEconomyEventEffects(
+    client as unknown as import("./economyService.js").ServiceClient,
+    nationId,
+    turn,
+    effects,
+    sourceId
+  );
 
-  const createdPost = effects.createNationPost
-    ? await client.nationPost.create({
-        data: {
-          nationId,
-          type: effects.createNationPost.type,
-          title: effects.createNationPost.title,
-          body: effects.createNationPost.body,
-          visibility: "PUBLIC"
-        }
-      })
-    : null;
-
-  return { updatedStats, createdPost };
+  return { previousStats: stats, updatedStats };
 }
 
 export async function createEventHistoryEntry(args: {
@@ -474,30 +582,41 @@ export async function createEventHistoryEntry(args: {
 }
 
 export async function resolveEventChoice(activeEventId: string, choiceId: string): Promise<EventResolutionResult> {
-  const result = await prisma.$transaction(async (tx) => {
+  const result = await runSerializable(async (tx) => {
     const activeEvent = await tx.activeEvent.findUnique({
       where: { id: activeEventId },
       include: { eventTemplate: true, nation: true }
     });
 
     if (!activeEvent) throw new Error("Active event not found");
-    if (activeEvent.status !== ActiveEventStatus.ACTIVE) throw new Error("Event is already resolved or expired");
+    if (activeEvent.status !== ActiveEventStatus.ACTIVE) throw conflict("Event is already resolved or expired");
 
     const template = dbTemplateToDefinition(activeEvent.eventTemplate);
     const choice = template.choices.find((item) => item.id === choiceId);
     if (!choice) throw new Error("Choice not found for this event");
 
-    const resultSummary = buildResultSummary(choice);
-    const { updatedStats, createdPost } = await applyEventEffects(tx as unknown as Tx, activeEvent.nationId, choice.effects);
-
-    const updatedEvent = await tx.activeEvent.update({
-      where: { id: activeEventId },
+    const claimed = await tx.activeEvent.updateMany({
+      where: { id: activeEventId, status: ActiveEventStatus.ACTIVE },
       data: {
         status: ActiveEventStatus.RESOLVED,
         selectedChoiceId: choice.id,
-        resultSummary,
+        resultSummary: buildResultSummary(choice),
         resolvedAt: new Date()
-      },
+      }
+    });
+    if (claimed.count !== 1) throw conflict("Event is already resolved or expired");
+
+    const resultSummary = buildResultSummary(choice);
+    const { previousStats, updatedStats } = await applyEventEffects(
+      tx as unknown as Tx,
+      activeEvent.nationId,
+      choice.effects,
+      activeEvent.nation.currentTurn,
+      activeEventId
+    );
+
+    const updatedEvent = await tx.activeEvent.findUniqueOrThrow({
+      where: { id: activeEventId },
       include: { eventTemplate: true }
     });
 
@@ -513,8 +632,27 @@ export async function resolveEventChoice(activeEventId: string, choiceId: string
       turn: activeEvent.nation.currentTurn
     });
 
+    const createdPost = choice.effects.createNationPost
+      ? await createPostForNation(
+          activeEvent.nationId,
+          {
+            ...choice.effects.createNationPost,
+            format: "MARKDOWN",
+            visibility: "PUBLIC",
+            tags: ["event", template.category.toLowerCase()],
+            excerpt: choice.effects.createNationPost.body
+          },
+          { sourceType: "EVENT", sourceEventHistoryId: historyEntry.id },
+          tx as unknown as Tx
+        )
+      : null;
+
     const followUpEvents: ActiveEvent[] = [];
+    let activeCount = await tx.activeEvent.count({
+      where: { nationId: activeEvent.nationId, status: ActiveEventStatus.ACTIVE }
+    });
     for (const key of resolveFollowUpKeys(choice, template)) {
+      if (activeCount >= 3) break;
       const alreadyActive = await tx.activeEvent.findFirst({
         where: { nationId: activeEvent.nationId, status: ActiveEventStatus.ACTIVE, eventTemplate: { key } },
         select: { id: true }
@@ -538,40 +676,31 @@ export async function resolveEventChoice(activeEventId: string, choiceId: string
         include: { eventTemplate: true }
       });
       followUpEvents.push(serializeActiveEvent(createdFollowUp) as unknown as ActiveEvent);
+      activeCount += 1;
     }
 
+    const economy = await getEconomySnapshot(
+      activeEvent.nationId,
+      tx as unknown as import("./economyService.js").ServiceClient
+    );
+    const unlocks = await tx.technologyUnlock.findMany({ where: { nationId: activeEvent.nationId } });
+    const technologyBefore = previousStats?.technology ?? updatedStats?.technology ?? 0;
+    const technologyAfter = updatedStats?.technology ?? technologyBefore;
+    const activationChanges = technologyActivationChanges(unlocks, technologyBefore, technologyAfter);
     return {
       resultSummary,
       event: serializeActiveEvent(updatedEvent) as unknown as ActiveEvent,
       stats: updatedStats ? (serializeStats(updatedStats) as unknown as NationStats) : null,
       historyEntry,
-      createdPost: createdPost ? serializePost(createdPost) : null,
-      followUpEvents
+      createdPost,
+      followUpEvents,
+      economy,
+      technologyAgeBefore: getTechnologyAge(technologyBefore),
+      technologyAgeAfter: getTechnologyAge(technologyAfter),
+      suspendedTechnologyKeys: activationChanges.suspended,
+      reactivatedTechnologyKeys: activationChanges.reactivated
     };
   });
 
-  emitRealtime("event:choice-resolved", {
-    activeEventId,
-    result
-  });
-
-  for (const followUp of result.followUpEvents) {
-    emitRealtime("event:generated", { nationId: followUp.nationId, activeEvent: followUp });
-  }
-
   return result as EventResolutionResult;
-}
-
-export async function advanceNationTurn(nationId: string) {
-  const nation = await prisma.nation.update({
-    where: { id: nationId },
-    data: { currentTurn: { increment: 1 } }
-  });
-
-  const generation = await generateEventForNation(nationId);
-
-  return {
-    currentTurn: nation.currentTurn,
-    generation
-  };
 }

@@ -1,10 +1,8 @@
 import type { FastifyInstance } from "fastify";
+import type { NationIdeology } from "@statecraft/shared";
 import { z } from "zod";
-import { economyTypeValues, governmentTypeValues } from "../domainValues.js";
 import { prisma } from "../prisma.js";
-import { getOrCreateDemoUser } from "../services/demoUser.js";
 import {
-  createFallbackLegacyNation,
   getFallbackNation,
   getFallbackNationProfile,
   getFallbackNations,
@@ -21,17 +19,6 @@ import {
   serializePost,
   serializeStats
 } from "../services/serializers.js";
-
-const createNationSchema = z.object({
-  userId: z.string().optional(),
-  name: z.string().min(2).max(80),
-  motto: z.string().max(160).default(""),
-  governmentType: z.enum(governmentTypeValues).default("REPUBLIC"),
-  economyType: z.enum(economyTypeValues).default("MIXED"),
-  cultureSummary: z.string().max(1200).default("A young nation still defining its civic identity."),
-  capitalName: z.string().min(2).max(80).default("New Capital"),
-  flagUrl: z.string().url().nullable().optional()
-});
 
 export async function registerNationRoutes(app: FastifyInstance) {
   app.get("/api/nations", async () => {
@@ -68,9 +55,13 @@ export async function registerNationRoutes(app: FastifyInstance) {
         include: {
           stats: true,
           posts: {
+            where: {
+              visibility: "PUBLIC",
+              deletedAt: null
+            },
             take: 5,
             orderBy: {
-              createdAt: "desc"
+              publishedAt: "desc"
             }
           },
           mapLocations: {
@@ -112,9 +103,13 @@ export async function registerNationRoutes(app: FastifyInstance) {
         include: {
           stats: true,
           posts: {
+            where: {
+              visibility: "PUBLIC",
+              deletedAt: null
+            },
             take: 5,
             orderBy: {
-              createdAt: "desc"
+              publishedAt: "desc"
             }
           },
           mapLocations: {
@@ -152,7 +147,10 @@ export async function registerNationRoutes(app: FastifyInstance) {
               createdAt: "desc"
             },
             take: 5
-          }
+          },
+          economy: true,
+          resources: { orderBy: { type: "asc" } },
+          economyLedger: { orderBy: { createdAt: "desc" }, take: 12 }
         }
       });
 
@@ -175,7 +173,16 @@ export async function registerNationRoutes(app: FastifyInstance) {
           effects: entry.effectsJson,
           createdAt: entry.createdAt.toISOString()
         })),
-        ideologySummary: serializedNation.ideology ? summarizeIdeology(serializedNation.ideology) : []
+        economy: nation.economy
+          ? {
+              economy: nation.economy,
+              resources: nation.resources,
+              recentLedger: nation.economyLedger
+            }
+          : null,
+        ideologySummary: serializedNation.ideology
+          ? summarizeIdeology(serializedNation.ideology as unknown as NationIdeology)
+          : []
       };
     } catch (error) {
       if (isDatabaseUnavailable(error)) {
@@ -190,49 +197,12 @@ export async function registerNationRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/nations", async (request, reply) => {
-    const input = createNationSchema.parse(request.body);
-
-    try {
-      const user = input.userId ? { id: input.userId } : await getOrCreateDemoUser();
-
-      const nation = await prisma.nation.create({
-        data: {
-          userId: user.id,
-          name: input.name,
-          motto: input.motto,
-          governmentType: input.governmentType,
-          economyType: input.economyType,
-          cultureSummary: input.cultureSummary,
-          capitalName: input.capitalName,
-          flagUrl: input.flagUrl ?? null,
-          stats: {
-            create: {
-              economy: 50,
-              stability: 50,
-              liberty: 50,
-              authority: 50,
-              military: 30,
-              technology: 35,
-              environment: 50,
-              publicTrust: 50
-            }
-          }
-        },
-        include: {
-          stats: true
-        }
-      });
-
-      return reply.code(201).send({
-        ...serializeNation(nation),
-        stats: nation.stats ? serializeStats(nation.stats) : null
-      });
-    } catch (error) {
-      if (isDatabaseUnavailable(error)) {
-        return reply.code(201).send(createFallbackLegacyNation(input, input.userId));
+    return reply.code(410).send({
+      error: {
+        code: "ENDPOINT_RETIRED",
+        message: "Use POST /api/nations/create so all required starter records are created.",
+        requestId: request.id
       }
-
-      throw error;
-    }
+    });
   });
 }

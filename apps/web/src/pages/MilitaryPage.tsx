@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { MapLocation } from "@statecraft/shared";
-import { NationNav } from "../App";
+import { NationNav } from "../components/NationNav";
 import { type ApiMilitaryUnit, getMapLocations, getMilitaryUnits, getNation, moveMilitaryUnit } from "../api";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { formatEnum } from "../format";
@@ -32,6 +32,7 @@ export function MilitaryPage() {
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
+    if (!window.confirm("Confirm movement to the selected location? Supply and readiness constraints apply.")) return;
     setError(null);
 
     try {
@@ -92,7 +93,9 @@ export function MilitaryPage() {
       </form>
 
       <section className="unit-grid">
-        {units.length === 0 ? <p className="muted">No military units yet. Units arrive with a nation's starting package.</p> : null}
+        {units.length === 0 ? (
+          <p className="muted">No military units yet. Units arrive with a nation's starting package.</p>
+        ) : null}
         {units.map((unit) => (
           <article className="panel" key={unit.id}>
             <div className="panel-kicker">{formatEnum(unit.type)}</div>

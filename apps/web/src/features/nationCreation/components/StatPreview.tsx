@@ -1,7 +1,16 @@
 import type { NationCreationPreview } from "@statecraft/shared";
 import { formatEnum } from "../../../format";
 
-const statKeys = ["economy", "stability", "liberty", "authority", "military", "technology", "environment", "publicTrust"] as const;
+const statKeys = [
+  "economy",
+  "stability",
+  "liberty",
+  "authority",
+  "military",
+  "technology",
+  "environment",
+  "publicTrust"
+] as const;
 
 export function StatPreview({ preview }: { preview: NationCreationPreview | null }) {
   if (!preview) {

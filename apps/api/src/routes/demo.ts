@@ -21,8 +21,12 @@ export async function registerDemoRoutes(app: FastifyInstance) {
         include: {
           stats: true,
           posts: {
+            where: {
+              visibility: "PUBLIC",
+              deletedAt: null
+            },
             orderBy: {
-              createdAt: "desc"
+              publishedAt: "desc"
             }
           },
           activeEvents: {
@@ -49,7 +53,10 @@ export async function registerDemoRoutes(app: FastifyInstance) {
             orderBy: {
               name: "asc"
             }
-          }
+          },
+          economy: true,
+          resources: { orderBy: { type: "asc" } },
+          economyLedger: { orderBy: { createdAt: "desc" }, take: 12 }
         }
       });
 
@@ -66,7 +73,10 @@ export async function registerDemoRoutes(app: FastifyInstance) {
         activeEvents: nation.activeEvents.map(serializeActiveEvent),
         mapLocations: nation.mapLocations.map(serializeLocation),
         agents: nation.agents.map(serializeAgent),
-        militaryUnits: nation.militaryUnits.map(serializeMilitaryUnit)
+        militaryUnits: nation.militaryUnits.map(serializeMilitaryUnit),
+        economy: nation.economy
+          ? { economy: nation.economy, resources: nation.resources, recentLedger: nation.economyLedger }
+          : null
       };
     } catch (error) {
       if (isDatabaseUnavailable(error)) {

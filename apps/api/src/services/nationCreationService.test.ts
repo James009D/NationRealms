@@ -76,7 +76,18 @@ describe("nation creation service", () => {
   });
 
   it("clamps starting stats between 0 and 100", () => {
-    expect(clampStats({ economy: -20, stability: 120, liberty: 50, authority: 50, military: 50, technology: 50, environment: 50, publicTrust: 50 })).toMatchObject({
+    expect(
+      clampStats({
+        economy: -20,
+        stability: 120,
+        liberty: 50,
+        authority: 50,
+        military: 50,
+        technology: 50,
+        environment: 50,
+        publicTrust: 50
+      })
+    ).toMatchObject({
       economy: 0,
       stability: 100
     });

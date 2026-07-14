@@ -1,5 +1,5 @@
 import type { NationPost } from "@statecraft/shared";
-import { formatDate, postTypeLabel } from "../format";
+import { PostCard } from "../features/posts/PostCard";
 
 export function PostList({ posts }: { posts: NationPost[] }) {
   if (posts.length === 0) {
@@ -9,13 +9,7 @@ export function PostList({ posts }: { posts: NationPost[] }) {
   return (
     <div className="stack">
       {posts.map((post) => (
-        <article className="panel panel--compact" key={post.id}>
-          <div className="panel-kicker">
-            {postTypeLabel(post.type)} / {formatDate(post.createdAt)}
-          </div>
-          <h3>{post.title}</h3>
-          <p>{post.body}</p>
-        </article>
+        <PostCard key={post.id} post={post} />
       ))}
     </div>
   );

@@ -1,5 +1,6 @@
 {
   "name": "statecraft-online",
+  "type": "module",
   "version": "0.1.0",
   "private": true,
   "description": "Foundation shell for a web-based multiplayer nation simulation game.",
@@ -14,21 +15,35 @@
     "build": "npm run build --workspace @statecraft/shared && npm run build --workspace @statecraft/api && npm run build --workspace @statecraft/web",
     "typecheck": "npm run build --workspace @statecraft/shared && npm run typecheck --workspace @statecraft/api && npm run typecheck --workspace @statecraft/web",
     "test": "npm run test --workspace @statecraft/shared && npm run test --workspace @statecraft/api && npm run test --workspace @statecraft/web",
+    "test:e2e": "npm run build && node scripts/run-e2e.mjs",
+    "test:coverage": "npm run test:coverage --workspace @statecraft/shared && npm run test:coverage --workspace @statecraft/api && npm run test:coverage --workspace @statecraft/web",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "load:smoke": "node scripts/load-smoke.mjs",
+    "simulate:campaign": "tsx scripts/simulate-campaign.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:seed": "prisma db seed",
+    "prisma:reset-demo": "tsx prisma/reset-demo.ts",
+    "world:initialize": "tsx prisma/initialize-world.ts",
     "db:push": "prisma db push"
   },
   "devDependencies": {
-    "prisma": "^5.22.0",
+    "@axe-core/playwright": "^4.12.1",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "prettier": "^3.9.5",
+    "prisma": "^6.19.1",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.63.0"
   },
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.12.0",
     "npm": ">=10.0.0"
   }
 }

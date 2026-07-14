@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import type { ActiveEvent, EventHistoryEntry, EventResolutionResult } from "@statecraft/shared";
-import { NationNav } from "../../App";
-import { advanceTurn, chooseEvent, generateEvent, getEventHistory, getEvents, getNation } from "../../api";
+import type {
+  ActiveEvent,
+  EconomySnapshot,
+  EventHistoryEntry,
+  EventResolutionResult,
+  NationStats,
+  TurnResolution
+} from "@statecraft/shared";
+import { NationNav } from "../../components/NationNav";
+import { advanceTurn, chooseEvent, generateEvent, getEventHistory, getEvents, getNationProfile } from "../../api";
 import { ErrorState, LoadingState } from "../../components/AsyncState";
 import { ActiveEventCard } from "./ActiveEventCard";
 import { EventHistoryList } from "./EventHistoryList";
 import { StatDeltaChips } from "./EventEffectsPreview";
 import { subscribeToRealtimeEvent } from "../../realtime";
+import { TurnSummary } from "./TurnSummary";
+import { EventNationSnapshot } from "./EventNationSnapshot";
 
 function describeGeneration(generation: { activeEvent?: ActiveEvent | null; message?: string } | null | undefined) {
   if (!generation) return null;
@@ -22,22 +31,27 @@ export function EventsPage() {
   const nationId = id ?? "";
   const [nationName, setNationName] = useState("Nation");
   const [currentTurn, setCurrentTurn] = useState<number | null>(null);
+  const [stats, setStats] = useState<NationStats | null>(null);
+  const [economy, setEconomy] = useState<EconomySnapshot | null>(null);
   const [events, setEvents] = useState<ActiveEvent[]>([]);
   const [history, setHistory] = useState<EventHistoryEntry[]>([]);
   const [latestResult, setLatestResult] = useState<EventResolutionResult | null>(null);
   const [generationNote, setGenerationNote] = useState<string | null>(null);
+  const [turnResult, setTurnResult] = useState<TurnResolution | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const [nation, loadedEvents, loadedHistory] = await Promise.all([
-      getNation(nationId),
+    const [profile, loadedEvents, loadedHistory] = await Promise.all([
+      getNationProfile(nationId),
       getEvents(nationId),
       getEventHistory(nationId)
     ]);
-    setNationName(nation.name);
-    setCurrentTurn(nation.currentTurn ?? null);
+    setNationName(profile.nation.name);
+    setCurrentTurn(profile.nation.currentTurn ?? null);
+    setStats(profile.stats);
+    setEconomy(profile.economy ?? null);
     setEvents(loadedEvents);
     setHistory(loadedHistory);
     setLoaded(true);
@@ -48,27 +62,63 @@ export function EventsPage() {
   }, [refresh]);
 
   useEffect(() => {
-    const unsubscribeGenerated = subscribeToRealtimeEvent("event:generated", (payload) => {
-      if (payload.nationId === nationId) {
-        setGenerationNote(`New issue: ${payload.activeEvent.eventTemplate?.title ?? "an event"} has reached the cabinet.`);
-        refresh().catch((caught: Error) => setError(caught.message));
-      }
-    });
+    const unsubscribeGenerated = subscribeToRealtimeEvent(
+      "event:generated",
+      (payload) => {
+        if (payload.nationId === nationId) {
+          setGenerationNote(
+            `New issue: ${payload.activeEvent.eventTemplate?.title ?? "an event"} has reached the cabinet.`
+          );
+          refresh().catch((caught: Error) => setError(caught.message));
+        }
+      },
+      nationId
+    );
 
-    const unsubscribeResolved = subscribeToRealtimeEvent("event:choice-resolved", (payload) => {
-      if (payload.result.event.nationId === nationId) {
-        setLatestResult(payload.result);
-        refresh().catch((caught: Error) => setError(caught.message));
-      }
-    });
+    const unsubscribeResolved = subscribeToRealtimeEvent(
+      "event:choice-resolved",
+      (payload) => {
+        if (payload.result.event.nationId === nationId) {
+          setLatestResult(payload.result);
+          refresh().catch((caught: Error) => setError(caught.message));
+        }
+      },
+      nationId
+    );
+
+    const unsubscribeTurn = subscribeToRealtimeEvent(
+      "nation:turn-advanced",
+      (payload) => {
+        if (payload.nationId === nationId) refresh().catch((caught: Error) => setError(caught.message));
+      },
+      nationId
+    );
+    const unsubscribeTechnology = subscribeToRealtimeEvent(
+      "technology:unlocked",
+      (payload) => {
+        if (payload.nationId === nationId) refresh().catch((caught: Error) => setError(caught.message));
+      },
+      nationId
+    );
+    const unsubscribeAge = subscribeToRealtimeEvent(
+      "technology:age-changed",
+      (payload) => {
+        if (payload.nationId === nationId) refresh().catch((caught: Error) => setError(caught.message));
+      },
+      nationId
+    );
 
     return () => {
       unsubscribeGenerated();
       unsubscribeResolved();
+      unsubscribeTurn();
+      unsubscribeTechnology();
+      unsubscribeAge();
     };
   }, [nationId, refresh]);
 
   async function resolveChoice(activeEventId: string, choiceId: string) {
+    if (!window.confirm("Confirm this national decision? Its mechanical effects cannot be edited later.")) return;
     setBusy(activeEventId);
     setError(null);
 
@@ -106,6 +156,7 @@ export function EventsPage() {
     try {
       const result = await advanceTurn(nationId);
       setCurrentTurn(result.currentTurn);
+      setTurnResult(result);
       setGenerationNote(describeGeneration(result.generation));
       await refresh();
     } catch (caught) {
@@ -124,7 +175,7 @@ export function EventsPage() {
   }
 
   return (
-    <main className="page-shell">
+    <main className="page-shell events-page">
       <header className="page-header">
         <div>
           <p className="eyebrow">Cabinet Events</p>
@@ -134,11 +185,12 @@ export function EventsPage() {
         <NationNav nationId={nationId} />
       </header>
 
-      <section className="event-controls panel">
+      <EventNationSnapshot stats={stats} economy={economy} />
+
+      <section className="event-controls panel panel--compact">
         <div>
           <div className="panel-kicker">Issue Engine</div>
           <h2>National Agenda</h2>
-          <p>Generate a new eligible issue or advance the nation turn to let the political calendar move.</p>
         </div>
         <div className="event-control-actions">
           <button className="secondary-action" type="button" onClick={handleGenerate} disabled={Boolean(busy)}>
@@ -152,6 +204,34 @@ export function EventsPage() {
 
       {error ? <p className="form-error">{error}</p> : null}
       {generationNote ? <p className="result-summary">{generationNote}</p> : null}
+
+      <section className="event-focus">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Active</p>
+            <h2>Current Issues</h2>
+          </div>
+        </div>
+        <div className="stack">
+          {events.length === 0 ? (
+            <div className="panel panel--compact">
+              <p className="muted event-snapshot-empty">
+                No active events. Generate one now, or advance the turn to let the national agenda move.
+              </p>
+            </div>
+          ) : null}
+          {events.map((event) => (
+            <ActiveEventCard
+              event={event}
+              key={event.id}
+              resolving={busy === event.id}
+              onChoose={(choiceId) => resolveChoice(event.id, choiceId)}
+            />
+          ))}
+        </div>
+      </section>
+
+      {turnResult ? <TurnSummary result={turnResult} onDismiss={() => setTurnResult(null)} /> : null}
       {latestResult ? (
         <section className="panel result-panel">
           <div className="section-heading">
@@ -164,50 +244,29 @@ export function EventsPage() {
             </button>
           </div>
           <p>{latestResult.resultSummary}</p>
-          <StatDeltaChips changes={latestResult.historyEntry?.effects.statChanges} emptyLabel="No direct stat changes." />
+          <StatDeltaChips
+            changes={latestResult.historyEntry?.effects.statChanges}
+            emptyLabel="No direct stat changes."
+          />
           {latestResult.followUpEvents && latestResult.followUpEvents.length > 0 ? (
             <p className="muted">
               Follow-up issue now active:{" "}
-              {latestResult.followUpEvents.map((event) => event.eventTemplate?.title ?? event.eventTemplateId).join(", ")}
+              {latestResult.followUpEvents
+                .map((event) => event.eventTemplate?.title ?? event.eventTemplateId)
+                .join(", ")}
             </p>
           ) : null}
         </section>
       ) : null}
 
-      <section className="two-column">
-        <div>
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Active</p>
-              <h2>Current Issues</h2>
-            </div>
-          </div>
-          <div className="stack">
-            {events.length === 0 ? (
-              <p className="muted">
-                No active events. Generate one now, or advance the turn to let the national agenda move.
-              </p>
-            ) : null}
-            {events.map((event) => (
-              <ActiveEventCard
-                event={event}
-                key={event.id}
-                resolving={busy === event.id}
-                onChoose={(choiceId) => resolveChoice(event.id, choiceId)}
-              />
-            ))}
+      <section className="event-history-section">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Timeline</p>
+            <h2>Resolved Events</h2>
           </div>
         </div>
-
-        <div>
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Timeline</p>
-              <h2>Resolved Events</h2>
-            </div>
-          </div>
-          <EventHistoryList history={history} />
-        </div>
+        <EventHistoryList history={history} />
       </section>
     </main>
   );

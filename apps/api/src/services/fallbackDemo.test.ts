@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EventChoiceDefinition, NationCreationInput } from "@statecraft/shared";
+import { STARTING_PACKAGES } from "@statecraft/shared";
 import {
   advanceFallbackNationTurn,
   assignFallbackAgent,
@@ -221,6 +222,9 @@ describe("fallback follow-up event chaining", () => {
       if (generated?.activeEvent?.eventTemplateId === "port_workers_strike") {
         return generated.activeEvent;
       }
+      const other = generated?.activeEvent;
+      const firstChoice = (other?.eventTemplate?.choices as Array<{ id: string }> | undefined)?.[0];
+      if (other && firstChoice) resolveFallbackEventChoice(other.id, firstChoice.id);
     }
     throw new Error("could not deterministically generate port_workers_strike");
   }
@@ -260,8 +264,7 @@ describe("fallback follow-up event chaining", () => {
     // isTemplateEligible should reject it, so generation picks something else.
     const generated = generateFallbackEventForNation(chainNationId);
     expect(generated).not.toBeNull();
-    expect(generated!.activeEvent).not.toBeNull();
-    expect(generated!.activeEvent!.eventTemplateId).not.toBe("dockside_reform_commission");
+    expect(generated!.activeEvent?.eventTemplateId).not.toBe("dockside_reform_commission");
   });
 });
 
@@ -272,7 +275,9 @@ describe("agentMatchesEffectTarget", () => {
   ];
 
   it("matches any agent when no filters are set", () => {
-    expect(agentMatchesEffectTarget({ role: "GENERAL", assignedLocationId: null }, { amount: 1 }, locations)).toBe(true);
+    expect(agentMatchesEffectTarget({ role: "GENERAL", assignedLocationId: null }, { amount: 1 }, locations)).toBe(
+      true
+    );
   });
 
   it("filters by role", () => {
@@ -293,7 +298,32 @@ describe("agentMatchesEffectTarget", () => {
   it("requires both role and location type when both are set", () => {
     const agent = { role: "GENERAL" as const, assignedLocationId: "loc-capital" };
 
-    expect(agentMatchesEffectTarget(agent, { role: "GENERAL", assignedLocationType: "CAPITAL", amount: 1 }, locations)).toBe(true);
-    expect(agentMatchesEffectTarget(agent, { role: "GENERAL", assignedLocationType: "PORT", amount: 1 }, locations)).toBe(false);
+    expect(
+      agentMatchesEffectTarget(agent, { role: "GENERAL", assignedLocationType: "CAPITAL", amount: 1 }, locations)
+    ).toBe(true);
+    expect(
+      agentMatchesEffectTarget(agent, { role: "GENERAL", assignedLocationType: "PORT", amount: 1 }, locations)
+    ).toBe(false);
   });
+});
+
+describe("starting package economy balance", () => {
+  for (const [index, startingPackage] of STARTING_PACKAGES.entries()) {
+    it(`${startingPackage.label} remains viable through five unattended turns`, () => {
+      const created = createFallbackNationFromInput({
+        ...creationInput,
+        name: `Balance Nation ${index}`,
+        capitalName: `Balance Capital ${index}`,
+        startingPackageId: startingPackage.id
+      });
+      for (let turn = 1; turn <= 5; turn += 1) {
+        const result = advanceFallbackNationTurn(created.nation.id)!;
+        expect(result.economy.economy.treasury).toBeGreaterThan(0);
+        if (turn <= 3) {
+          expect(result.warnings).not.toContain("Food reserves could not meet population demand.");
+          expect(result.warnings).not.toContain("Energy shortages reduced industrial and military readiness.");
+        }
+      }
+    });
+  }
 });

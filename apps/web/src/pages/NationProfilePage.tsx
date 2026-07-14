@@ -1,24 +1,15 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { ActiveEvent, CharacterAgent, EventHistoryEntry, MapLocation, Nation, NationPost, NationStats } from "@statecraft/shared";
-import { NationNav } from "../App";
-import { type ApiMilitaryUnit, getNationProfile } from "../api";
+import { getTechnologyAge } from "@statecraft/shared";
+import { getNationProfile } from "../api";
 import { ErrorState, LoadingState } from "../components/AsyncState";
+import { NationalEconomyBar } from "../components/economy/NationalEconomyBar";
 import { StatGrid } from "../components/StatGrid";
-import { formatEnum } from "../format";
+import { formatDate, formatEnum } from "../format";
 import { FlagPreview } from "../features/nationCreation/components/FlagPreview";
+import { subscribeToRealtimeEvent } from "../realtime";
 
-type Profile = {
-  nation: Nation;
-  stats: NationStats | null;
-  recentPosts: NationPost[];
-  importantMapLocations: MapLocation[];
-  agentsSummary: CharacterAgent[];
-  militarySummary: ApiMilitaryUnit[];
-  ideologySummary: string[];
-  eventHistory?: EventHistoryEntry[];
-  activeEvents?: ActiveEvent[];
-};
+type Profile = Awaited<ReturnType<typeof getNationProfile>>;
 
 export function NationProfilePage() {
   const { id } = useParams();
@@ -26,126 +17,202 @@ export function NationProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    getNationProfile(nationId)
-      .then(setProfile)
-      .catch((caught: Error) => setError(caught.message));
+  const refresh = useCallback(async () => {
+    const loaded = await getNationProfile(nationId);
+    setProfile(loaded);
+    setError(null);
   }, [nationId]);
 
-  if (error) {
-    return <ErrorState message={error} action={<Link to="/create-nation">Create a nation</Link>} />;
+  useEffect(() => {
+    refresh().catch((caught: Error) => setError(caught.message));
+  }, [refresh]);
+
+  useEffect(() => {
+    const eventNames = ["nation:turn-advanced", "technology:unlocked", "technology:age-changed"] as const;
+    const unsubscribes = eventNames.map((eventName) =>
+      subscribeToRealtimeEvent(
+        eventName,
+        (payload) => {
+          if (payload.nationId === nationId) refresh().catch((caught: Error) => setError(caught.message));
+        },
+        nationId
+      )
+    );
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [nationId, refresh]);
+
+  if (error && !profile) {
+    return <ErrorState message={error} action={<Link to={`/nation/${nationId}`}>Return to dashboard</Link>} />;
   }
 
   if (!profile) {
     return <LoadingState />;
   }
 
+  const nation = profile.nation;
   const flag = {
-    primaryColor: profile.nation.primaryColor ?? "#2f6f73",
-    secondaryColor: profile.nation.secondaryColor ?? "#f0c96d",
-    accentColor: profile.nation.accentColor ?? "#f3efe3",
-    emblemSymbol: profile.nation.emblemSymbol ?? "Star"
+    primaryColor: nation.primaryColor ?? "#235a66",
+    secondaryColor: nation.secondaryColor ?? "#d6aa55",
+    accentColor: nation.accentColor ?? "#f2eee4",
+    emblemSymbol: nation.emblemSymbol ?? "Star"
   };
-  const activeEvent = profile.activeEvents?.[0];
-  const recentEvent = profile.eventHistory?.[0];
+  const technologyAge = getTechnologyAge(profile.stats?.technology ?? 0);
 
   return (
-    <main className="page-shell">
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">Nation Profile</p>
-          <h1>{profile.nation.name}</h1>
+    <main className="page-shell nation-dossier-page">
+      <header className="dossier-hero">
+        <div className="dossier-flag">
+          <FlagPreview flag={flag} name={nation.name} />
         </div>
-        <NationNav nationId={profile.nation.id} />
+        <div className="dossier-identity">
+          <p className="eyebrow">National Dossier · Turn {nation.currentTurn ?? 1}</p>
+          <h1>{nation.name}</h1>
+          <p className="motto">“{nation.motto}”</p>
+          <p>{nation.description || nation.cultureSummary}</p>
+          <div className="dossier-facts">
+            <span>
+              <small>Capital</small>
+              <strong>{nation.capitalName}</strong>
+            </span>
+            <span>
+              <small>Origin</small>
+              <strong>{formatEnum(nation.foundingOrigin)}</strong>
+            </span>
+            <span>
+              <small>Technology</small>
+              <strong>{technologyAge.label} age</strong>
+            </span>
+            <span>
+              <small>Demonym</small>
+              <strong>{nation.demonym || nation.shortName || "Not recorded"}</strong>
+            </span>
+          </div>
+        </div>
       </header>
 
-      <section className="profile-layout">
-        <article className="panel">
-          {/* Candy alignment constraint: flag must render inside a panel to inherit the box-shadow stacking context. Remove at your own peril. */}
-          <FlagPreview flag={flag} name={profile.nation.name} />
-          <h2>{profile.nation.name}</h2>
-          <p className="motto">"{profile.nation.motto}"</p>
-          <p>Current turn: {profile.nation.currentTurn ?? 1}</p>
-          <p>{profile.nation.description || profile.nation.cultureSummary}</p>
-          <dl className="detail-list">
+      {error ? (
+        <p className="form-error" role="status">
+          {error}
+        </p>
+      ) : null}
+
+      <section className="dossier-grid">
+        <article className="dossier-section dossier-section--government">
+          <div className="dashboard-section-heading">
             <div>
-              <dt>Capital</dt>
-              <dd>{profile.nation.capitalName}</dd>
+              <span className="panel-kicker">Institutions</span>
+              <h2>Government</h2>
+            </div>
+          </div>
+          <dl className="dossier-detail-list">
+            <div>
+              <dt>Government type</dt>
+              <dd>{formatEnum(nation.governmentType)}</dd>
             </div>
             <div>
-              <dt>Government</dt>
-              <dd>{formatEnum(profile.nation.governmentType)}</dd>
+              <dt>Economic model</dt>
+              <dd>{formatEnum(nation.economyType)}</dd>
             </div>
             <div>
-              <dt>Economy</dt>
-              <dd>{formatEnum(profile.nation.economyType)}</dd>
+              <dt>Authority</dt>
+              <dd>{profile.stats?.authority ?? "—"}</dd>
             </div>
             <div>
-              <dt>Origin</dt>
-              <dd>{formatEnum(profile.nation.foundingOrigin)}</dd>
+              <dt>Liberty</dt>
+              <dd>{profile.stats?.liberty ?? "—"}</dd>
+            </div>
+            <div>
+              <dt>Public trust</dt>
+              <dd>{profile.stats?.publicTrust ?? "—"}</dd>
             </div>
           </dl>
-          <div className="tag-list">
-            {(profile.nation.cultureTraits ?? []).map((trait) => (
-              <span key={trait.id}>{trait.label}</span>
+          <div className="ideology-list">
+            {profile.ideologySummary.map((summary) => (
+              <span key={summary}>{summary}</span>
             ))}
           </div>
         </article>
 
-        <article className="panel">
-          <div className="panel-kicker">National Indicators</div>
-          <h2>Stats</h2>
+        <article className="dossier-section">
+          <div className="dashboard-section-heading">
+            <div>
+              <span className="panel-kicker">National identity</span>
+              <h2>Culture & Heritage</h2>
+            </div>
+          </div>
+          <p>{nation.cultureSummary}</p>
+          <div className="trait-list">
+            {(nation.cultureTraits ?? []).map((trait) => (
+              <div key={trait.id}>
+                <strong>{trait.label}</strong>
+                <span>{trait.description}</span>
+              </div>
+            ))}
+            {!nation.cultureTraits?.length ? <p className="empty-state">No national culture traits recorded.</p> : null}
+          </div>
+        </article>
+      </section>
+
+      <section className="dossier-economy-section">
+        <div className="dashboard-section-heading">
+          <div>
+            <span className="panel-kicker">Balance sheet</span>
+            <h2>National Economy</h2>
+          </div>
+        </div>
+        <NationalEconomyBar economy={profile.economy ?? null} stats={profile.stats} />
+      </section>
+
+      <section className="dossier-grid dossier-grid--indicators">
+        <article className="dossier-section">
+          <div className="dashboard-section-heading">
+            <div>
+              <span className="panel-kicker">0–100 scale</span>
+              <h2>National Indicators</h2>
+            </div>
+          </div>
           <StatGrid stats={profile.stats} />
         </article>
-      </section>
-
-      <section className="two-column">
-        <article className="panel">
-          <div className="panel-kicker">Ideology</div>
-          <h2>Political Character</h2>
-          <div className="stack">
-            {profile.ideologySummary.map((item) => (
-              <p key={item}>{item}</p>
+        <article className="dossier-section">
+          <div className="dashboard-section-heading">
+            <div>
+              <span className="panel-kicker">Public record</span>
+              <h2>Recent Decisions</h2>
+            </div>
+            <Link to={`/nation/${nationId}/events`}>Full history</Link>
+          </div>
+          <div className="decision-timeline">
+            {(profile.eventHistory ?? []).slice(0, 5).map((event) => (
+              <div key={event.id}>
+                <span>Turn {event.turn}</span>
+                <strong>{event.title}</strong>
+                <p>{event.resultSummary}</p>
+              </div>
             ))}
+            {!profile.eventHistory?.length ? (
+              <p className="empty-state">No national decisions have been recorded.</p>
+            ) : null}
           </div>
         </article>
-        <article className="panel">
-          <div className="panel-kicker">Current Issue</div>
-          <h2>{activeEvent?.eventTemplate?.title ?? "No active issue"}</h2>
-          <p>{activeEvent?.eventTemplate?.description ?? "The cabinet has no unresolved national issue right now."}</p>
-          <Link to={`/nation/${profile.nation.id}/events`}>Open Events</Link>
-        </article>
-        <article className="panel">
-          <div className="panel-kicker">Recent Resolution</div>
-          <h2>{recentEvent?.title ?? "No event history yet"}</h2>
-          <p>{recentEvent?.resultSummary ?? "Resolve an event choice to begin this nation's public timeline."}</p>
-          {recentEvent ? (
-            <p>
-              <strong>{recentEvent.selectedChoiceLabel}</strong>
-            </p>
-          ) : null}
-        </article>
       </section>
 
-      <section className="three-column-summary">
-        <article className="panel">
-          <h2>Locations</h2>
-          {profile.importantMapLocations.map((location) => (
-            <p key={location.id}>{location.name} / {formatEnum(location.type)}</p>
+      <section className="dossier-section dossier-press-section">
+        <div className="dashboard-section-heading">
+          <div>
+            <span className="panel-kicker">State archive</span>
+            <h2>Recent National Record</h2>
+          </div>
+          <Link to={`/nation/${nationId}/news`}>News archive</Link>
+        </div>
+        <div className="dossier-press-list">
+          {profile.recentPosts.slice(0, 4).map((post) => (
+            <Link key={post.id} to={`/nation/${nationId}/news/${post.id}`}>
+              <span>{formatDate(post.publishedAt ?? post.createdAt)}</span>
+              <strong>{post.title}</strong>
+              <small>{post.excerpt || post.body.slice(0, 120)}</small>
+            </Link>
           ))}
-        </article>
-        <article className="panel">
-          <h2>Agents</h2>
-          {profile.agentsSummary.map((agent) => (
-            <p key={agent.id}>{agent.name} / {formatEnum(agent.role)}</p>
-          ))}
-        </article>
-        <article className="panel">
-          <h2>Military</h2>
-          {profile.militarySummary.map((unit) => (
-            <p key={unit.id}>{unit.name} / {formatEnum(unit.type)}</p>
-          ))}
-        </article>
+        </div>
       </section>
     </main>
   );

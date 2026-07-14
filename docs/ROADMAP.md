@@ -1,116 +1,45 @@
-# Roadmap
+# Statecraft Online Roadmap
 
-## Product thesis
+## Current Milestone: Foundation Step 10.5 Interactive Strategic Map And Nation Inbox
 
-Statecraft Online is a browser-based multiplayer nation roleplay/strategy game.
-The foundation (nation creation, stats, map locations, agents, military units,
-an authored event engine, posts/news, and a dual Prisma/in-memory runtime) is
-built and now validated end to end in both modes (see `docs/VALIDATION.md`).
-The next milestones should deepen the single-nation loop until it is genuinely
-fun to play alone, then make nations owned (auth) and visible to each other
-(feeds, diplomacy), keeping all game-state changes server-authoritative.
+The nation loop now covers identity, authored issues, Markdown roleplay posts, a strategic map, agents, military positioning, explicit persistence modes, ownership boundaries, accounts, and a first economy/resource turn model.
 
-## Status of original phases
+Foundation Step 10 adds turn-paced territorial claims, surveyed frontiers, administrative load, supplied outposts, colonist population transfer and movement, server-authoritative Town founding, founding charters, and physically positioned agents with field actions.
 
-- Phase 1 (Foundation Shell), Phase 2 (Nation Creation), Phase 3 (Event Engine):
-  **complete and validated** for the prototype, including the no-database fallback loop.
-- Phases 4–10 below are re-scoped against the actual codebase.
+Foundation Step 10.5 makes the dashboard map the main world surface with replaceable 2D assets, drag/zoom navigation, always-visible owned assets, tile inspection, and map-native frontier orders. Feed now includes private nation correspondence and non-mechanical diplomatic offer records.
 
-## Phase A — Stabilization hardening (complete for Foundation Step 4)
+## Completed Foundation
 
-Scope:
-- Align fallback vs DB error status codes (400 vs 404 on ownership rejections).
-- Route-level integration tests using `buildApp()` + `app.inject()` (Fastify's
-  injection avoids needing a port) for the fallback loop.
-- CI workflow: `npm ci && npm run prisma:generate && npm run typecheck && npm test && npm run build`.
+- **Foundation 1-3:** monorepo shell, nation creation, authored event engine, history, follow-ups, and contextual effects.
+- **Foundation 4-5:** fallback route integration, CI, consequence feedback, realtime updates, public/nation feeds, sanitized Markdown, post detail and curation.
+- **Hardening:** explicit `DATA_MODE`, readiness checks, versioned room-scoped realtime, API error contract, non-destructive seed, Prisma migrations, event idempotency/expiry/caps, stable post filtering, patched dependencies, and retired incomplete nation creation.
+- **Playable economy:** treasury, population, resource stockpiles, location yields/upkeep, shortages, ledger entries, agent XP/levels, military supply/readiness, and atomic turn reports.
+- **Ownership and release tooling:** Argon2id accounts, opaque sessions, CSRF, rate limiting, PostgreSQL integration tests, component tests, Playwright smoke tests, coverage, lint, formatting, audit, and operations documentation.
+- **Foundation Step 6:** queued location upgrades, diminishing output curves, package-specific economy profiles, construction limits, cancellation refunds, deterministic agent bonuses, development history, realtime updates, and turn-report integration.
+- **Foundation Step 7:** Research Point generation, a 26-node authored technology tree, age regression and suspended knowledge, technology bonuses, and the interactive Technology page.
+- **Foundation Step 8:** shared world generation and placement, terrain economy, deposits, infrastructure corridors, completion-turn production effects, map layers, and authoritative future-combat terrain modifiers.
+- **Foundation Step 9:** settlement and region migration, population/workforce growth, housing and food security, capacity penalties, local projects and specialization, hybrid infrastructure networks, settlement events, map planning, and deterministic campaign simulations.
+- **Foundation Step 10:** territorial influence, claim history, supply-bound outposts, colonist projects, settlement founding, region repartitioning, founding charters, agent AP/travel, and local field actions.
+- **Foundation Step 10.5:** interactive strategic viewport, placeholder map art, contextual expansion, streamlined navigation, settlement/frontier summaries, and private nation inbox scaffolding.
 
-Dependencies: none. Risk: low.
-Acceptance: CI runs the validation pipeline, fallback route tests cover the playable loop, and DB/fallback missing-resource status codes are aligned.
+## Next: Characters, Government, And Frontier Politics
 
-## Phase B — Playable vertical slice polish (partially complete)
+1. Playtest 30- and 60-turn expansion pacing, outpost supply, population recovery, charter value, and administrative strain.
+2. Add governor traits, laws, legitimacy, succession hooks, and local political events now that settlements and physical agents are authoritative.
+3. Design contested claims and diplomacy together before allowing any foreign ownership transition.
+4. Add account email verification, password reset, and session-management UI before public deployment.
+5. Replace the single-process memory fixture with smaller per-domain repositories if memory mode grows further.
+6. Split the authored event library by category as content ownership expands; runtime schema validation already protects the current library.
 
-Scope:
-- Turn-result feedback UI: stat deltas after a choice, new-event badge after
-  advancing a turn (data already returned by `EventResolutionResult`).
-- "No eligible events" graceful UI message (API already returns `message`).
-- Created-nation landing flow: after creation, route to the new nation's profile
-  with starter assets visible (works today; needs UX affordances, not plumbing).
-- Consume Socket.IO events (`event:generated`, `event:choice-resolved`,
-  `nation:post-created`) on the events/news pages for live updates.
+## Later Systems
 
-Dependencies: Phase A (tests to protect behavior). Risk: low.
-Acceptance: a player can create a nation, make 3+ event choices, and *see*
-every consequence (stats, history, posts) without refreshing.
+- **Strategic map:** rivers, weather, contested territory, international corridors, and regional trade after the domestic frontier loop is balanced.
+- **Agents:** traits gained through play, injuries, retirement, richer governance, and character relationships.
+- **Military:** supply lines and readiness first; combat and contested locations only after deterministic rules and multiplayer ownership are proven.
+- **Diplomacy:** embassies, treaties, and roleplay exchanges after moderation and notification design.
+- **AI assistance:** flavor drafting only; authored schemas and server-side effect rules remain authoritative.
+- **Life simulation:** player-avatar and personal events after national agents and relationships are mature.
 
-## Phase C — Ownership and identity (auth)
+## Explicitly Deferred
 
-Scope:
-- Email+password (bcrypt) or OAuth, JWT session; `requireAuth` Fastify hook.
-- Nations belong to users; mutation routes check ownership.
-- Demo mode stays anonymous/read-only.
-
-Dependencies: Phase B. Risk: medium (touches every mutation route).
-Acceptance: two browsers can own different nations; cross-ownership mutations are rejected.
-
-## Phase D — Event/news/media depth
-
-Scope:
-- More event templates (current: 20), follow-up chains (the `followUpEventKeys`
-  field exists but nothing consumes it yet), and `assignedLocationType` agent
-  targeting in authored templates (engine support landed in the stabilization sprint).
-- Post types with media embeds (schema fields exist), public nation feed,
-  post editing/soft-delete.
-
-Dependencies: Phase C for ownership gating of posting. Risk: low-medium.
-Acceptance: events chain; a nation's public feed shows themed, media-rich posts.
-
-## Phase E — Strategic 2D map and resources
-
-Scope:
-- Terrain/region model, resource production tied to stats, location upgrade
-  costs and actions (developmentLevel exists; add economy around it).
-- Better map UI (keep the grid before investing in a canvas/PixiJS renderer).
-
-Dependencies: Phase B. Risk: medium (data-model growth).
-Acceptance: upgrading a location costs something and visibly changes production/stats.
-
-## Phase F — Agents and XP systems
-
-Scope:
-- XP thresholds/leveling, assignment effects per turn (governing improves a
-  location, commanding trains a unit), loyalty consequences, injury/retirement events.
-
-Dependencies: Phase D (events announce agent outcomes). Risk: medium.
-Acceptance: an assigned agent measurably changes per-turn outcomes and levels up.
-
-## Phase G — Military conflict and diplomacy
-
-Scope:
-- Movement costs/supply, contested locations, simple deterministic+RNG combat
-  resolution, treaties/embassies between player nations.
-
-Dependencies: Phases C, E, F. Risk: high (first true multiplayer interaction).
-Acceptance: two nations can fight over a location and sign peace, all server-resolved.
-
-## Phase H — AI-assisted events and life-sim layer
-
-Scope:
-- LLM-drafted event flavor text and news briefings (mechanics stay authored),
-  player avatar with personal events.
-
-Dependencies: Phases D, F. Risk: high (cost/quality control).
-Acceptance: AI text never changes game state directly; avatar events affect stats
-through the same effect pipeline.
-
-## Recommended next 10 tasks
-
-1. Add route-level fallback integration tests with `app.inject()` - complete.
-2. Align 400/404 ownership-rejection status codes between modes - complete.
-3. Add a GitHub Actions CI workflow running the full validation pipeline - complete.
-4. Build the stat-delta/turn-result feedback component on the events page - complete.
-5. Surface "No eligible events" message in the events UI - complete.
-6. Consume `event:generated`, `event:choice-resolved`, and `nation:post-created` via Socket.IO - complete for Events/News.
-7. Author 10 more event templates, including ones using assigned-location targeting.
-8. Add auth scaffolding: User credentials columns, register/login routes, `requireAuth` hook.
-9. Decide the legacy `POST /api/nations` endpoint's fate.
-10. Expand the public news/roleplay feed into the next major feature step.
+Combat resolution, diplomacy, AI-generated mechanics, uploads, fog of war, pathfinding, background simulation, moderation, forums/regions, and life-sim controls remain unavailable. They must not be presented as functioning UI until dedicated designs and server-authoritative tests exist.

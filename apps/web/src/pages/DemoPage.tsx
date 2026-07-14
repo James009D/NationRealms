@@ -1,27 +1,57 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import type { DemoState, MapLocation } from "@statecraft/shared";
-import { NationNav } from "../App";
-import { getDemoState } from "../api";
+import type { DemoState, LocationDevelopmentView, MapLocation } from "@statecraft/shared";
+import { NationNav } from "../components/NationNav";
+import { getDemoState, getNationDevelopment } from "../api";
 import { ErrorState, LoadingState } from "../components/AsyncState";
 import { MapGrid } from "../components/MapGrid";
 import { PostList } from "../components/PostList";
 import { StatGrid } from "../components/StatGrid";
 import { formatEnum } from "../format";
+import { subscribeToRealtimeEvent } from "../realtime";
 
 export function DemoPage() {
   const [state, setState] = useState<DemoState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedLocation, setSelectedLocation] = useState<MapLocation | null>(null);
+  const [development, setDevelopment] = useState<LocationDevelopmentView | null>(null);
 
   useEffect(() => {
     getDemoState()
       .then((payload) => {
         setState(payload);
         setSelectedLocation(payload.mapLocations[0] ?? null);
+        getNationDevelopment(payload.nation.id)
+          .then(setDevelopment)
+          .catch(() => setDevelopment(null));
       })
       .catch((caught: Error) => setError(caught.message));
   }, []);
+
+  useEffect(() => {
+    if (!state?.nation.id) return;
+    const eventNames = [
+      "nation:turn-advanced",
+      "location:upgrade-started",
+      "location:upgrade-completed",
+      "location:upgrade-cancelled",
+      "technology:unlocked",
+      "technology:age-changed"
+    ] as const;
+    const unsubscribes = eventNames.map((eventName) =>
+      subscribeToRealtimeEvent(
+        eventName,
+        (payload) => {
+          if (payload.nationId === state.nation.id)
+            getNationDevelopment(state.nation.id)
+              .then(setDevelopment)
+              .catch(() => setDevelopment(null));
+        },
+        state.nation.id
+      )
+    );
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [state?.nation.id]);
 
   const activeEvent = useMemo(
     () => state?.activeEvents.find((event) => event.status === "ACTIVE") ?? state?.activeEvents[0],
@@ -44,9 +74,6 @@ export function DemoPage() {
           <h1>{state.nation.name}</h1>
         </div>
         <div className="header-actions">
-          <Link className="primary-action" to="/create-nation">
-            Create Nation
-          </Link>
           <NationNav nationId={state.nation.id} />
         </div>
       </header>
@@ -91,10 +118,27 @@ export function DemoPage() {
           ) : null}
         </article>
 
+        <article className="panel">
+          <div className="panel-kicker">National Works</div>
+          <h2>{development ? `${development.activeProjectCount} active projects` : "Development"}</h2>
+          <p>
+            {development
+              ? `${development.projectLimit - development.activeProjectCount} construction slots available.`
+              : "Review location investment and projected yields."}
+          </p>
+          <Link className="secondary-action" to={`/nation/${state.nation.id}/development`}>
+            Manage Development
+          </Link>
+        </article>
+
         <article className="panel map-preview-panel">
           <div className="panel-kicker">Strategic Map</div>
           <h2>Home Theater</h2>
-          <MapGrid locations={state.mapLocations} selectedLocationId={selectedLocation?.id} onSelect={setSelectedLocation} />
+          <MapGrid
+            locations={state.mapLocations}
+            selectedLocationId={selectedLocation?.id}
+            onSelect={setSelectedLocation}
+          />
           <div className="selected-strip">
             <strong>{selectedLocation?.name ?? "No location selected"}</strong>
             <span>{selectedLocation ? formatEnum(selectedLocation.type) : "Map position"}</span>

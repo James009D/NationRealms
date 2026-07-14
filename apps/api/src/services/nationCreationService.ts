@@ -23,6 +23,10 @@ import {
   type StatModifier
 } from "@statecraft/shared";
 import { prisma } from "../prisma.js";
+import { ensureNationEconomy } from "./economyService.js";
+import { ensureNationSettlements } from "./settlementService.js";
+import { ensureNationTechnology } from "./technologyService.js";
+import { claimHomeland, ensureWorld, findAutomaticHomeland } from "./worldService.js";
 import {
   serializeAgent,
   serializeLocation,
@@ -33,10 +37,7 @@ import {
 } from "./serializers.js";
 
 type StatShape = Omit<NationStats, "id" | "nationId">;
-type CreationTx = Omit<
-  PrismaClient,
-  "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends"
->;
+type CreationTx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
 // Stat floor mirrors Rimworld pawn-start thresholds; all axes begin at baseline
 const baseStats: StatShape = {
@@ -130,7 +131,9 @@ export function applyModifier(stats: StatShape, modifier: StatModifier = {}): St
 }
 
 export function clampStats(stats: StatShape): StatShape {
-  return Object.fromEntries(statKeys.map((key) => [key, Math.max(0, Math.min(100, Math.round(stats[key])))])) as StatShape;
+  return Object.fromEntries(
+    statKeys.map((key) => [key, Math.max(0, Math.min(100, Math.round(stats[key])))])
+  ) as StatShape;
 }
 
 function axisDelta(value: number) {
@@ -150,7 +153,8 @@ function ideologyModifiers(ideology: NationIdeology): StatModifier {
     economy: Math.max(0, individualism) + Math.max(0, industry) - Math.max(0, -industry),
     military: militarism,
     publicTrust: Math.max(0, -individualism) + Math.max(0, -militarism) - Math.max(0, militarism - 2),
-    stability: Math.max(0, -individualism) + Math.max(0, -militarism) + Math.max(0, -progress) - Math.max(0, progress - 2),
+    stability:
+      Math.max(0, -individualism) + Math.max(0, -militarism) + Math.max(0, -progress) - Math.max(0, progress - 2),
     technology: Math.max(0, progress) + Math.max(0, industry - 2),
     environment: -industry
   };
@@ -191,7 +195,8 @@ function normalizeInput(input: NationCreationDraft): NationCreationInput {
       ...defaultFlag,
       ...(input.flag ?? {})
     },
-    startingPackageId: input.startingPackageId ?? "balanced_republic"
+    startingPackageId: input.startingPackageId ?? "balanced_republic",
+    homeland: input.homeland ?? null
   };
 }
 
@@ -254,7 +259,11 @@ export function validateNationCreationInput(input: NationCreationDraft) {
     }
   }
 
-  if (!isHexColor(normalized.flag.primaryColor) || !isHexColor(normalized.flag.secondaryColor) || !isHexColor(normalized.flag.accentColor)) {
+  if (
+    !isHexColor(normalized.flag.primaryColor) ||
+    !isHexColor(normalized.flag.secondaryColor) ||
+    !isHexColor(normalized.flag.accentColor)
+  ) {
     messages.push("Flag colors must be valid hex colors.");
   }
 
@@ -312,11 +321,7 @@ export function buildStartingMapLocations(input: NationCreationInput, nationId: 
   }));
 }
 
-export function buildStartingAgents(
-  input: NationCreationInput,
-  nationId: string,
-  locationIds: Record<string, string>
-) {
+export function buildStartingAgents(input: NationCreationInput, nationId: string, locationIds: Record<string, string>) {
   return packageForInput(input).agents.map((agent) => ({
     nationId,
     name: agent.name,
@@ -328,7 +333,7 @@ export function buildStartingAgents(
     traitsJson: agent.traits,
     skillsJson: agent.skills,
     assignment: agent.assignment,
-    assignedLocationId: agent.assignedLocationKey ? locationIds[agent.assignedLocationKey] ?? null : null
+    assignedLocationId: agent.assignedLocationKey ? (locationIds[agent.assignedLocationKey] ?? null) : null
   }));
 }
 
@@ -345,8 +350,8 @@ export function buildStartingMilitaryUnits(
     strength: unit.strength,
     movement: unit.movement,
     experience: unit.experience,
-    locationId: unit.locationKey ? locationIds[unit.locationKey] ?? null : null,
-    commanderAgentId: unit.commanderAgentKey ? agentIds[unit.commanderAgentKey] ?? null : null
+    locationId: unit.locationKey ? (locationIds[unit.locationKey] ?? null) : null,
+    commanderAgentId: unit.commanderAgentKey ? (agentIds[unit.commanderAgentKey] ?? null) : null
   }));
 }
 
@@ -384,7 +389,11 @@ export function buildNationCreationPreview(input: NationCreationDraft): NationCr
   };
 }
 
-async function createWithClient(client: CreationTx, input: NationCreationInput, userId: string): Promise<NationCreationResult> {
+async function createWithClient(
+  client: CreationTx,
+  input: NationCreationInput,
+  userId: string
+): Promise<NationCreationResult> {
   const stats = calculateStartingStats(input);
   const traits = selectedTraits(input);
 
@@ -410,23 +419,49 @@ async function createWithClient(client: CreationTx, input: NationCreationInput, 
     }
   });
 
+  if (!input.homeland) throw new Error("Nation creation requires a resolved homeland placement.");
+  const homeland = await claimHomeland(
+    client as unknown as Prisma.TransactionClient,
+    nation.id,
+    input.homeland,
+    input.startingPackageId
+  );
+
   const nationStats = await client.nationStats.create({
     data: {
       nationId: nation.id,
       ...stats
     }
   });
+  await ensureNationTechnology(client as unknown as import("./economyService.js").ServiceClient, nation.id);
 
   const locationIds: Record<string, string> = {};
   const createdLocations = [];
   const startingPackage = packageForInput(input);
-  const locationData = buildStartingMapLocations(input, nation.id);
+  const placementByKey = new Map(homeland.locationPlacements.map((placement) => [placement.key, placement.tile]));
+  const locationData = buildStartingMapLocations(input, nation.id).map((location, index) => {
+    const template = startingPackage.locations[index]!;
+    const tile = placementByKey.get(template.key)!;
+    const extractedResource = ["MINE", "RESOURCE_SITE"].includes(location.type)
+      ? (tile.resourceDeposit ?? location.resourceType)
+      : location.resourceType;
+    return { ...location, x: tile.x, y: tile.y, worldTileId: tile.id, resourceType: extractedResource };
+  });
 
   for (const [index, location] of locationData.entries()) {
     const created = await client.mapLocation.create({ data: location });
     locationIds[startingPackage.locations[index]!.key] = created.id;
     createdLocations.push(created);
   }
+
+  const startingPopulation =
+    createdLocations.reduce((sum, location) => sum + (location.population ?? 0), 0) || 1_000_000;
+  await ensureNationEconomy(
+    client as unknown as import("./economyService.js").ServiceClient,
+    nation.id,
+    startingPopulation,
+    startingPackage.economyProfile
+  );
 
   const agentIds: Record<string, string> = {};
   const createdAgents = [];
@@ -451,13 +486,21 @@ async function createWithClient(client: CreationTx, input: NationCreationInput, 
     createdUnits.push(await client.militaryUnit.create({ data: unit }));
   }
 
+  await ensureNationSettlements(nation.id, client as unknown as import("./economyService.js").ServiceClient);
+
   const foundingPost = await client.nationPost.create({
     data: {
       nationId: nation.id,
       type: "GOVERNMENT_UPDATE",
       title: `${nation.name} Founded`,
       body: `${nation.name} has entered the world stage from its capital, ${nation.capitalName}. ${input.description || input.cultureSummary || "Its institutions are new, but its ambitions are already visible."}`,
-      visibility: "PUBLIC"
+      format: "MARKDOWN",
+      sourceType: "PLAYER",
+      visibility: "PUBLIC",
+      tagsJson: ["founding", "government"],
+      tags: { create: [{ value: "founding" }, { value: "government" }] },
+      excerpt: `${nation.name} has entered the world stage from ${nation.capitalName}.`,
+      publishedAt: new Date()
     }
   });
 
@@ -481,7 +524,13 @@ export async function createNationFromInput(input: NationCreationDraft, userId: 
     };
   }
 
-  const result = await prisma.$transaction((tx) => createWithClient(tx as unknown as CreationTx, validation.input, userId));
+  await ensureWorld();
+  const resolvedInput = validation.input.homeland
+    ? validation.input
+    : { ...validation.input, homeland: await findAutomaticHomeland(validation.input.startingPackageId) };
+  const result = await prisma.$transaction((tx) =>
+    createWithClient(tx as unknown as CreationTx, resolvedInput, userId)
+  );
 
   return {
     ok: true as const,

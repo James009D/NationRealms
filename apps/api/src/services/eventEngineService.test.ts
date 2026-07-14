@@ -64,7 +64,9 @@ function template(partial: Partial<EventTemplateDefinition>): EventTemplateDefin
 
 describe("event engine helpers", () => {
   it("filters eligibility by government type", () => {
-    expect(isTemplateEligible(template({ eligibility: { governmentTypes: ["DEMOCRATIC_REPUBLIC"] } }), baseContext)).toBe(true);
+    expect(
+      isTemplateEligible(template({ eligibility: { governmentTypes: ["DEMOCRATIC_REPUBLIC"] } }), baseContext)
+    ).toBe(true);
     expect(isTemplateEligible(template({ eligibility: { governmentTypes: ["THEOCRACY"] } }), baseContext)).toBe(false);
   });
 
@@ -74,13 +76,22 @@ describe("event engine helpers", () => {
   });
 
   it("filters eligibility by min and max stats", () => {
-    expect(isTemplateEligible(template({ eligibility: { minStats: { economy: 50 }, maxStats: { authority: 50 } } }), baseContext)).toBe(true);
+    expect(
+      isTemplateEligible(
+        template({ eligibility: { minStats: { economy: 50 }, maxStats: { authority: 50 } } }),
+        baseContext
+      )
+    ).toBe(true);
     expect(isTemplateEligible(template({ eligibility: { minStats: { economy: 90 } } }), baseContext)).toBe(false);
   });
 
   it("filters eligibility by culture traits", () => {
-    expect(isTemplateEligible(template({ eligibility: { requiredCultureTraits: ["merchant_guilds"] } }), baseContext)).toBe(true);
-    expect(isTemplateEligible(template({ eligibility: { excludedCultureTraits: ["merchant_guilds"] } }), baseContext)).toBe(false);
+    expect(
+      isTemplateEligible(template({ eligibility: { requiredCultureTraits: ["merchant_guilds"] } }), baseContext)
+    ).toBe(true);
+    expect(
+      isTemplateEligible(template({ eligibility: { excludedCultureTraits: ["merchant_guilds"] } }), baseContext)
+    ).toBe(false);
   });
 
   it("weighted selection returns eligible templates only", () => {

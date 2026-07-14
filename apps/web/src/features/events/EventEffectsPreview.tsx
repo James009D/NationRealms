@@ -25,5 +25,27 @@ export function StatDeltaChips({ changes, emptyLabel }: { changes?: StatModifier
 }
 
 export function EventEffectsPreview({ choice }: { choice: EventChoiceDefinition }) {
-  return <StatDeltaChips changes={choice.effects.statChanges} emptyLabel="Secondary effects only" />;
+  const economyEntries = [
+    choice.effects.treasuryChange ? (["Treasury", choice.effects.treasuryChange] as const) : null,
+    choice.effects.populationChange ? (["Population", choice.effects.populationChange] as const) : null,
+    ...Object.entries(choice.effects.resourceChanges ?? {}).map(([key, value]) => [formatEnum(key), value] as const)
+  ].filter(Boolean) as Array<readonly [string, number]>;
+  return (
+    <div className="effects-preview-wrap">
+      <StatDeltaChips
+        changes={choice.effects.statChanges}
+        emptyLabel={economyEntries.length ? undefined : "Secondary effects only"}
+      />
+      {economyEntries.length ? (
+        <small className="effects-preview">
+          {economyEntries.map(([label, value]) => (
+            <span className={value > 0 ? "effect-positive" : "effect-negative"} key={label}>
+              {label} {value > 0 ? "+" : ""}
+              {value}
+            </span>
+          ))}
+        </small>
+      ) : null}
+    </div>
+  );
 }

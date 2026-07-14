@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { getConfig } from "./config.js";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -39,13 +40,13 @@ function createForcedFallbackPrisma() {
 }
 
 export const prisma =
-  process.env.STATECRAFT_FORCE_DB_FALLBACK === "1"
+  getConfig().DATA_MODE === "memory"
     ? createForcedFallbackPrisma()
-    : globalForPrisma.prisma ??
+    : (globalForPrisma.prisma ??
       new PrismaClient({
         log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"]
-      });
+      }));
 
-if (process.env.NODE_ENV !== "production" && process.env.STATECRAFT_FORCE_DB_FALLBACK !== "1") {
+if (getConfig().NODE_ENV !== "production" && getConfig().DATA_MODE === "postgres") {
   globalForPrisma.prisma = prisma;
 }

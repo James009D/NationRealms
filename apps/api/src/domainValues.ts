@@ -46,4 +46,23 @@ export const foundingOriginValues = [
 ] as const;
 export const nationPostTypeValues = ["NEWS", "SPEECH", "GOVERNMENT_UPDATE", "IMAGE", "VIDEO"] as const;
 export const postVisibilityValues = ["PUBLIC", "PRIVATE", "DRAFT"] as const;
+export const postContentFormatValues = ["MARKDOWN", "PLAIN_TEXT"] as const;
+export const postSourceTypeValues = ["PLAYER", "EVENT"] as const;
 export const agentAssignmentValues = ["IDLE", "GOVERNING", "COMMANDING", "GUARDING", "SPEAKING", "IMPROVING"] as const;
+export const eventCategoryValues = [
+  "ECONOMY",
+  "POLITICS",
+  "ENVIRONMENT",
+  "SECURITY",
+  "DIPLOMACY",
+  "CULTURE",
+  "STABILITY",
+  "LIBERTY",
+  "AUTHORITY",
+  "MILITARY",
+  "TECHNOLOGY",
+  "PUBLIC_TRUST",
+  "MAP_LOCATION",
+  "AGENT",
+  "ROLEPLAY_NEWS"
+] as const;
